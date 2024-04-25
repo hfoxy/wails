@@ -63,33 +63,24 @@ func (m *MessageProcessor) processCallMethod(method int, rw http.ResponseWriter,
 			m.callErrorCallback(window, "Error parsing call options: %s", callID, err)
 			return
 		}
-		var boundMethod *BoundMethod
-		if options.PackageName != "" {
-			boundMethod = globalApplication.bindings.Get(&options)
-			if boundMethod == nil {
-				m.callErrorCallback(window, "Error getting binding for method: %s", callID, fmt.Errorf("method '%s' not found", options.Name()))
-				return
-			}
-		} else {
-			boundMethod = globalApplication.bindings.GetByID(options.MethodID)
-		}
+		boundMethod := globalApplication.bindings.Get(&options)
 		if boundMethod == nil {
-			m.callErrorCallback(window, "Error getting binding for method: %s", callID, fmt.Errorf("method ID '%s' not found", options.Name()))
+			m.callErrorCallback(window, "Error getting binding for method: %s", callID, fmt.Errorf("method '%s' not found", options.String()))
 			return
 		}
 
 		ctx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
 
-		ambigiousID := false
+		ambiguousID := false
 		m.l.Lock()
 		if m.runningCalls[*callID] != nil {
-			ambigiousID = true
+			ambiguousID = true
 		} else {
 			m.runningCalls[*callID] = cancel
 		}
 		m.l.Unlock()
 
-		if ambigiousID {
+		if ambiguousID {
 			cancel()
 			m.callErrorCallback(window, "Error calling method: %s, a method call with the same id is already running", callID, err)
 			return
@@ -119,7 +110,12 @@ func (m *MessageProcessor) processCallMethod(method int, rw http.ResponseWriter,
 				}
 			}
 			m.callCallback(window, callID, string(jsonResult), true)
-			m.Info("Call Binding:", "method", boundMethod, "args", options.Args, "result", result)
+
+			var jsonArgs struct {
+				Args json.RawMessage `json:"args"`
+			}
+			params.ToStruct(&jsonArgs)
+			m.Info("Call Binding:", "method", boundMethod, "args", string(jsonArgs.Args), "result", result)
 		}()
 		m.ok(rw)
 	default:

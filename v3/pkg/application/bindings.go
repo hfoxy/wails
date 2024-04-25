@@ -2,9 +2,12 @@ package application
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/wailsapp/wails/v3/internal/hash"
@@ -13,20 +16,21 @@ import (
 )
 
 type CallOptions struct {
-	MethodID    uint32 `json:"methodID"`
-	PackageName string `json:"packageName"`
-	StructName  string `json:"structName"`
-	MethodName  string `json:"methodName"`
-	Args        []any  `json:"args"`
+	MethodID   uint32            `json:"methodID"`
+	MethodName string            `json:"methodName"`
+	Args       []json.RawMessage `json:"args"`
 }
 
-func (c CallOptions) Name() string {
-	return fmt.Sprintf("%s.%s.%s", c.PackageName, c.StructName, c.MethodName)
+func (c *CallOptions) String() string {
+	if c.MethodName == "" {
+		return "MethodID:" + strconv.FormatUint(uint64(c.MethodID), 10)
+	}
+	return c.MethodName
 }
 
 type PluginCallOptions struct {
-	Name string `json:"name"`
-	Args []any  `json:"args"`
+	Name string            `json:"name"`
+	Args []json.RawMessage `json:"args"`
 }
 
 var reservedPluginMethods = []string{
@@ -64,7 +68,6 @@ func (p *Parameter) IsError() bool {
 // BoundMethod defines all the data related to a Go method that is
 // bound to the Wails application
 type BoundMethod struct {
-	ID          uint32        `json:"id"`
 	Name        string        `json:"name"`
 	Inputs      []*Parameter  `json:"inputs,omitempty"`
 	Outputs     []*Parameter  `json:"outputs,omitempty"`
@@ -78,14 +81,14 @@ type BoundMethod struct {
 }
 
 type Bindings struct {
-	boundMethods  map[string]map[string]map[string]*BoundMethod
+	boundByName   map[string]*BoundMethod
 	boundByID     map[uint32]*BoundMethod
 	methodAliases map[uint32]uint32
 }
 
 func NewBindings(structs []any, aliases map[uint32]uint32) (*Bindings, error) {
 	b := &Bindings{
-		boundMethods:  make(map[string]map[string]map[string]*BoundMethod),
+		boundByName:   make(map[string]*BoundMethod),
 		boundByID:     make(map[uint32]*BoundMethod),
 		methodAliases: aliases,
 	}
@@ -107,19 +110,28 @@ func (b *Bindings) Add(structPtr interface{}) error {
 	}
 
 	for _, method := range methods {
-		packageName := method.PackageName
-		structName := method.StructName
-		methodName := method.Name
+		name, err := b.GenerateName(method.PackagePath, method.StructName, method.Name)
+		if err != nil {
+			return err
+		}
+		id, err := b.GenerateID(name)
+		if err != nil {
+			return err
+		}
 
 		// Add it as a regular method
-		if _, ok := b.boundMethods[packageName]; !ok {
-			b.boundMethods[packageName] = make(map[string]map[string]*BoundMethod)
+		b.boundByName[name] = method
+		b.boundByID[id] = method
+
+		args := []any{"name", method, "id", id}
+		if b.methodAliases != nil {
+			alias, found := lo.FindKey(b.methodAliases, id)
+			if found {
+				args = append(args, "alias", alias)
+			}
 		}
-		if _, ok := b.boundMethods[packageName][structName]; !ok {
-			b.boundMethods[packageName][structName] = make(map[string]*BoundMethod)
-		}
-		b.boundMethods[packageName][structName][methodName] = method
-		b.boundByID[method.ID] = method
+		globalApplication.debug("Adding method:", args...)
+
 	}
 	return nil
 }
@@ -142,20 +154,23 @@ func (b *Bindings) AddPlugins(plugins map[string]Plugin) error {
 			if !lo.Contains(exportedMethods, method.Name) {
 				continue
 			}
-			packageName := "wails-plugins"
+			packagePath := "wails-plugins"
 			structName := pluginID
 			methodName := method.Name
 
+			name, err := b.GenerateName(packagePath, structName, methodName)
+			if err != nil {
+				return err
+			}
+			id, err := b.GenerateID(name)
+			if err != nil {
+				return err
+			}
+
 			// Add it as a regular method
-			if _, ok := b.boundMethods[packageName]; !ok {
-				b.boundMethods[packageName] = make(map[string]map[string]*BoundMethod)
-			}
-			if _, ok := b.boundMethods[packageName][structName]; !ok {
-				b.boundMethods[packageName][structName] = make(map[string]*BoundMethod)
-			}
-			b.boundMethods[packageName][structName][methodName] = method
-			b.boundByID[method.ID] = method
-			globalApplication.debug("Added plugin method: "+structName+"."+methodName, "id", method.ID)
+			b.boundByName[name] = method
+			b.boundByID[id] = method
+			globalApplication.debug("Added plugin method: "+structName+"."+methodName, "id", id)
 		}
 	}
 	return nil
@@ -163,19 +178,16 @@ func (b *Bindings) AddPlugins(plugins map[string]Plugin) error {
 
 // Get returns the bound method with the given name
 func (b *Bindings) Get(options *CallOptions) *BoundMethod {
-	_, ok := b.boundMethods[options.PackageName]
-	if !ok {
-		return nil
+	result, ok := lo.Coalesce(b.GetByID(options.MethodID), b.GetByName(options.MethodName))
+	if ok {
+		return result
 	}
-	_, ok = b.boundMethods[options.PackageName][options.StructName]
-	if !ok {
-		return nil
-	}
-	method, ok := b.boundMethods[options.PackageName][options.StructName][options.MethodName]
-	if !ok {
-		return nil
-	}
-	return method
+	return nil
+}
+
+// GetByName returns the bound method with the given name
+func (b *Bindings) GetByName(name string) *BoundMethod {
+	return b.boundByName[name]
 }
 
 // GetByID returns the bound method with the given ID
@@ -188,6 +200,18 @@ func (b *Bindings) GetByID(id uint32) *BoundMethod {
 	}
 	result := b.boundByID[id]
 	return result
+}
+
+// GenerateName constructs a fully qualified name for a method
+func (b *Bindings) GenerateName(packagePath, structName, methodName string) (string, error) {
+	name := fmt.Sprintf("%s.%s.%s", packagePath, structName, methodName)
+
+	// Check if we already have it
+	boundMethod, ok := b.boundByName[name]
+	if ok {
+		return "", fmt.Errorf("oh wow, we're sorry about this! Amazingly, a collision was detected for method '%s' (it has the same name as '%s'). To continue, please rename it. Sorry :(", name, boundMethod.String())
+	}
+	return name, nil
 }
 
 // GenerateID generates a unique ID for a binding
@@ -205,7 +229,7 @@ func (b *Bindings) GenerateID(name string) (uint32, error) {
 }
 
 func (b *BoundMethod) String() string {
-	return fmt.Sprintf("%s.%s.%s", b.PackageName, b.StructName, b.Name)
+	return fmt.Sprintf("%s.%s.%s", b.PackagePath, b.StructName, b.Name)
 }
 
 func (b *Bindings) getMethods(value interface{}, isPlugin bool) ([]*BoundMethod, error) {
@@ -234,16 +258,16 @@ func (b *Bindings) getMethods(value interface{}, isPlugin bool) ([]*BoundMethod,
 	structValue := reflect.ValueOf(value)
 	structTypeString := structType.String()
 	baseName := structTypeString[1:]
+	packageName, structName, _ := strings.Cut(baseName, ".")
+	packagePath, _ := lo.Coalesce(structType.Elem().PkgPath(), "main")
 
-	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
+	ctxType := reflect.TypeFor[context.Context]()
 
 	// Process Methods
 	for i := 0; i < structType.NumMethod(); i++ {
 		methodDef := structType.Method(i)
 		methodName := methodDef.Name
-		packageName, structName, _ := strings.Cut(baseName, ".")
 		method := structValue.MethodByName(methodName)
-		packagePath, _ := lo.Coalesce(structType.PkgPath(), "main")
 
 		// Create new method
 		boundMethod := &BoundMethod{
@@ -256,22 +280,7 @@ func (b *Bindings) getMethods(value interface{}, isPlugin bool) ([]*BoundMethod,
 			Comments:    "",
 			Method:      method,
 		}
-		var err error
-		boundMethod.ID, err = hash.Fnv(boundMethod.String())
-		if err != nil {
-			return nil, err
-		}
 
-		if !isPlugin {
-			args := []any{"name", boundMethod, "id", boundMethod.ID}
-			if b.methodAliases != nil {
-				alias, found := lo.FindKey(b.methodAliases, boundMethod.ID)
-				if found {
-					args = append(args, "alias", alias)
-				}
-			}
-			globalApplication.debug("Adding method:", args...)
-		}
 		// Iterate inputs
 		methodType := method.Type()
 		inputParamCount := methodType.NumIn()
@@ -303,9 +312,10 @@ func (b *Bindings) getMethods(value interface{}, isPlugin bool) ([]*BoundMethod,
 	return result, nil
 }
 
-// Call will attempt to call this bound method with the given args
-func (b *BoundMethod) Call(ctx context.Context, args []interface{}) (returnValue interface{}, err error) {
+var errorType = reflect.TypeFor[error]()
 
+// Call will attempt to call this bound method with the given args
+func (b *BoundMethod) Call(ctx context.Context, args []json.RawMessage) (returnValue interface{}, err error) {
 	// Use a defer statement to capture panics
 	defer func() {
 		if r := recover(); r != nil {
@@ -325,65 +335,72 @@ func (b *BoundMethod) Call(ctx context.Context, args []interface{}) (returnValue
 		}
 	}()
 
+	argCount := len(args)
 	if b.needsContext {
-		args = append([]any{ctx}, args...)
+		argCount++
 	}
 
-	// Check inputs
-	expectedInputLength := len(b.Inputs)
-	actualInputLength := len(args)
-
-	// If the method is variadic, we need to check the minimum number of inputs
-	if b.Method.Type().IsVariadic() {
-		if actualInputLength < expectedInputLength-1 {
-			return nil, fmt.Errorf("%s takes at least %d inputs. Received %d", b.Name, expectedInputLength, actualInputLength)
-		}
-	} else {
-		if expectedInputLength != actualInputLength {
-			return nil, fmt.Errorf("%s takes %d inputs. Received %d", b.Name, expectedInputLength, actualInputLength)
-		}
+	if argCount != len(b.Inputs) {
+		err = fmt.Errorf("%s expects %d arguments, received %d", b.Name, len(b.Inputs), argCount)
+		return
 	}
 
-	/** Convert inputs to reflect values **/
+	// Convert inputs to values of appropriate type
 
-	// Create slice for the input arguments to the method call
-	callArgs := make([]reflect.Value, actualInputLength)
+	callArgs := make([]reflect.Value, argCount)
+	base := 0
+
+	if b.needsContext {
+		callArgs[0] = reflect.ValueOf(ctx)
+		base++
+	}
 
 	// Iterate over given arguments
 	for index, arg := range args {
-		// Save the converted argument
-		if arg == nil {
-			callArgs[index] = reflect.Zero(b.Inputs[index].ReflectType)
-			continue
+		value := reflect.New(b.Inputs[base+index].ReflectType)
+		err = json.Unmarshal(arg, value.Interface())
+		if err != nil {
+			err = fmt.Errorf("could not parse argument #%d: %w", index, err)
+			return
 		}
-		callArgs[index] = reflect.ValueOf(arg)
+		callArgs[base+index] = value.Elem()
 	}
 
 	// Do the call
-	callResults := b.Method.Call(callArgs)
+	var callResults []reflect.Value
+	if b.Method.Type().IsVariadic() {
+		callResults = b.Method.CallSlice(callArgs)
+	} else {
+		callResults = b.Method.Call(callArgs)
+	}
 
-	//** Check results **//
-	switch len(b.Outputs) {
-	case 1:
-		// Loop over results and determine if the result
-		// is an error or not
-		for _, result := range callResults {
-			interfac := result.Interface()
-			temp, ok := interfac.(error)
-			if ok {
-				err = temp
-			} else {
-				returnValue = interfac
+	var nonErrorOutputs = make([]any, 0, len(callResults))
+	var errorOutputs []error
+
+	for _, result := range callResults {
+		if result.Type() == errorType {
+			if result.IsNil() {
+				continue
 			}
-		}
-	case 2:
-		returnValue = callResults[0].Interface()
-		if temp, ok := callResults[1].Interface().(error); ok {
-			err = temp
+			if errorOutputs == nil {
+				errorOutputs = make([]error, 0, len(callResults)-len(nonErrorOutputs))
+				nonErrorOutputs = nil
+			}
+			errorOutputs = append(errorOutputs, result.Interface().(error))
+		} else if nonErrorOutputs != nil {
+			nonErrorOutputs = append(nonErrorOutputs, result.Interface())
 		}
 	}
 
-	return returnValue, err
+	if errorOutputs != nil {
+		err = errors.Join(errorOutputs...)
+	} else if len(nonErrorOutputs) == 1 {
+		returnValue = nonErrorOutputs[0]
+	} else if len(nonErrorOutputs) > 1 {
+		returnValue = nonErrorOutputs
+	}
+
+	return
 }
 
 // isStructPtr returns true if the value given is a

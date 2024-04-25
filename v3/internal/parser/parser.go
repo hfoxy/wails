@@ -4,363 +4,481 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
-	"go/build"
-	"go/parser"
-	"go/token"
-	"log"
+	"go/types"
 	"os"
 	"path/filepath"
-	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/wailsapp/wails/v3/internal/flags"
-
+	"github.com/pterm/pterm"
 	"github.com/samber/lo"
+	"github.com/wailsapp/wails/v3/internal/flags"
 	"github.com/wailsapp/wails/v3/internal/hash"
+	"golang.org/x/tools/go/packages"
 )
 
-type packagePath = string
-type structName = string
-
-// ErrNoBindingsFound is returned when no bound structs are found
-var ErrNoBindingsFound = errors.New("no bound structs found")
-
-type StructDef struct {
-	Name        string
-	DocComments []string
-	Fields      []*Field
-}
-
-func (s *StructDef) DefaultValueList() string {
-	var allFields []string
-	for _, field := range s.Fields {
-		thisFieldWithDefaultValue := fmt.Sprintf("%s = %s", field.JSName(), field.DefaultValue())
-		allFields = append(allFields, thisFieldWithDefaultValue)
-	}
-	return strings.Join(allFields, ", ")
-}
-
-type ParameterType struct {
-	Name      string
-	IsStruct  bool
-	IsSlice   bool
-	IsPointer bool
-	IsEnum    bool
-	MapKey    *ParameterType
-	MapValue  *ParameterType
-	Package   string
-}
-
-type EnumDef struct {
-	Name        string
-	Filename    string
-	DocComments []string
-	Values      []*EnumValue
-}
-
-type EnumValue struct {
-	Name        string
-	Value       string
-	DocComments []string
-}
+const JsonPkgPath = "github.com/wailsapp/wails/v3/internal/parser/json"
 
 type Parameter struct {
-	Name    string
-	Type    *ParameterType
-	project *Project
+	*types.Var
+	index int
+
+	Parent *BoundMethod
 }
 
-func (p *Parameter) NamespacedStructType(pkgName string) string {
-	var typeName string
-	thisPkg := p.project.packageCache[pkgName]
-	pkgInfo := p.project.packageCache[p.Type.Package]
-	if pkgInfo.Name != "" && pkgInfo.Path != thisPkg.Path {
-		typeName = pkgInfo.Name
-	} else {
-		if p.Type.Package != "" && p.Type.Package != pkgName {
-			parts := strings.Split(p.Type.Package, "/")
-			typeName = parts[len(parts)-1] + "."
+func (p *Parameter) Name() (name string) {
+	name = p.Var.Name()
+
+	if name == "" || name == "_" {
+		return "$" + strconv.Itoa(p.index)
+	} else if slices.Contains(reservedWords, name) {
+		return "$" + name
+	}
+	return name
+}
+
+func (p *Parameter) Variadic() bool {
+	s := p.Parent.Signature()
+	return s.Variadic() && p.index == s.Params().Len()-1
+}
+
+func (p *Package) namespaceOf(t *types.TypeName) string {
+	if p.Package.String() == t.Pkg().String() {
+		return ""
+	}
+	return t.Pkg().Name() + "."
+}
+
+// JSTypes returns the javascript type for the given types.Type
+// The second return value indicates whether parentheses are needed
+func JSType(t types.Type, pkg *Package) (string, bool) {
+
+	switch x := t.(type) {
+	case *types.Basic:
+		switch x.Kind() {
+		case types.String:
+			return "string", false
+		case types.Int, types.Int8, types.Int16, types.Int32, types.Int64, types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64, types.Uintptr, types.Float32, types.Float64:
+			return "number", false
+		case types.Bool:
+			return "boolean", false
+		default:
+			return "any", false
 		}
+	case *types.Slice:
+		jstype, needsParentheses := JSType(x.Elem(), pkg)
+		if needsParentheses {
+			return "(" + jstype + ")[]", false
+		}
+		return jstype + "[]", false
+	case *types.Array:
+		jstype, needsParentheses := JSType(x.Elem(), pkg)
+		if needsParentheses {
+			return "(" + jstype + ")[]", false
+		}
+		return jstype + "[]", false
+	case *types.Named:
+		return pkg.namespaceOf(x.Obj()) + x.Obj().Name(), false
+	case *types.Map:
+		jstype, _ := JSType(x.Elem(), pkg)
+		return "{ [_: string]: " + jstype + " }", false
+	case *types.Pointer:
+		jstype, _ := JSType(x.Elem(), pkg)
+		return jstype + " | null", true
+	case *types.Struct:
+		return pkg.anonymousStructID(x), false
+	case *types.Alias:
+		jstype, _ := JSType(aliasToNamed(x), pkg)
+		return jstype, false
 	}
-	return typeName + p.Type.Name
+	return "any", false
 }
-func (p *Parameter) NamespacedStructVariable(pkgName string) string {
-	var typeName string
-	if p.Type.Package != "" && p.Type.Package != pkgName {
-		parts := strings.Split(p.Type.Package, "/")
-		typeName = parts[len(parts)-1]
-	}
-	return typeName + p.Type.Name
-}
 
-func (p *Parameter) JSType(pkgName string) string {
-	// Convert type to javascript equivalent type
-	var typeName string
-	switch p.Type.Name {
-	case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "float32", "float64":
-		typeName = "number"
-	case "string":
-		typeName = "string"
-	case "bool":
-		typeName = "boolean"
-	default:
-		typeName = p.Type.Name
-	}
-
-	// if the type is a struct, we need to add the package name
-	if p.Type.IsStruct || p.Type.IsEnum {
-		typeName = p.NamespacedStructType(pkgName)
-		typeName = strings.ReplaceAll(typeName, ".", "")
-	}
-
-	// Add slice suffix
-	if p.Type.IsSlice {
-		typeName += "[]"
-	}
-
-	// Add pointer suffix
-	if p.Type.IsPointer {
-		typeName += " | null"
-	}
-
-	return typeName
+func (p *Parameter) JSType(pkg *Package) string {
+	jstype, _ := JSType(p.Type(), pkg)
+	return jstype
 }
 
 type BoundMethod struct {
-	Package    string
-	PackageDir string
-	Name       string
-	DocComment string
-	Inputs     []*Parameter
-	Outputs    []*Parameter
-	ID         uint32
-	Alias      *uint32
+	*types.Func
+	ID  uint32
+	FQN string
 }
 
-func (m BoundMethod) JSInputs() []*Parameter {
-	if len(m.Inputs) > 0 {
-		if firstArg := m.Inputs[0]; isContext(firstArg) {
-			return m.Inputs[1:]
+func (m *BoundMethod) ParseTuple(tuple *types.Tuple) (result []*Parameter) {
+	if tuple == nil {
+		return
+	}
+
+	for i := 0; i < tuple.Len(); i++ {
+		result = append(result, &Parameter{
+			Var:    tuple.At(i),
+			index:  i,
+			Parent: m,
+		})
+	}
+	return
+}
+
+func (m *BoundMethod) Signature() *types.Signature {
+	// Type of *types.Func is always a *types.Signature
+	return m.Type().(*types.Signature)
+}
+
+func (m *BoundMethod) Params() []*Parameter {
+	tuple := m.Signature().Params()
+	return m.ParseTuple(tuple)
+}
+
+func (m *BoundMethod) Results() []*Parameter {
+	tuple := m.Signature().Results()
+	return m.ParseTuple(tuple)
+}
+
+func (m *BoundMethod) JSInputs() []*Parameter {
+	params := m.Params()
+
+	if len(params) > 0 {
+		if named, ok := params[0].Type().(*types.Named); ok && named.Obj() != nil {
+			if named.Obj().Name() == "Context" && named.Obj().Pkg().Name() == "context" {
+				return params[1:]
+			}
 		}
 	}
 
-	return m.Inputs
+	return params
 }
 
-func (m BoundMethod) IDAsString() string {
-	return strconv.Itoa(int(m.ID))
-}
-
-type Field struct {
-	Name    string
-	Type    *ParameterType
-	Project *Project
-}
-
-func (f *Field) JSName() string {
-	return strings.ToLower(f.Name[0:1]) + f.Name[1:]
-}
-
-// TSBuild contains the typescript to build a field for a JS object
-// via assignment for simple types or constructors for structs
-func (f *Field) TSBuild(pkg string) string {
-	if !f.Type.IsStruct {
-		return fmt.Sprintf("safeSource['%s']", f.JSName())
-	}
-
-	if f.Type.Package == "" || f.Type.Package == pkg {
-		return fmt.Sprintf("%s.createFrom(source['%s'])", f.Type.Name, f.JSName())
-	}
-
-	return fmt.Sprintf("%s.%s.createFrom(source['%s'])", pkgAlias(f.Type.Package), f.Type.Name, f.JSName())
-}
-
-func (f *Field) JSDef(pkg string) string {
-	var jsType string
-	switch f.Type.Name {
-	case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "float32", "float64":
-		jsType = "number"
-	case "string":
-		jsType = "string"
-	case "bool":
-		jsType = "boolean"
-	default:
-		jsType = f.Type.Name
-	}
-
-	var result string
-	isExternalStruct := f.Type.Package != "" && f.Type.Package != pkg && f.Type.IsStruct
-	if f.Type.Package == "" || f.Type.Package == pkg || !isExternalStruct {
-		result += fmt.Sprintf("%s: %s;", f.JSName(), jsType)
-	} else {
-		parts := strings.Split(f.Type.Package, "/")
-		result += fmt.Sprintf("%s: %s.%s;", f.JSName(), parts[len(parts)-1], jsType)
-	}
-
-	if !ast.IsExported(f.Name) {
-		result += " // Warning: this is unexported in the Go struct."
-	}
-
-	return result
-}
-
-func (f *Field) JSDocType(pkg string) string {
-	var jsType string
-	switch f.Type.Name {
-	case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "float32", "float64":
-		jsType = "number"
-	case "string":
-		jsType = "string"
-	case "bool":
-		jsType = "boolean"
-	default:
-		jsType = f.Type.Name
-	}
-
-	// If we are the same package, just return the type
-	externalPkgInfo := f.Project.packageCache[f.Type.Package]
-	if externalPkgInfo.Name == pkg {
-		return jsType
-	}
-
-	var result string
-	isExternalStruct := f.Type.Package != "" && f.Type.Package != pkg && f.Type.IsStruct
-	if f.Type.Package == "" || !isExternalStruct {
-		if f.Type.IsStruct || f.Type.IsEnum {
-			// get the relative package directory
-			result = fmt.Sprintf("%s%s", externalPkgInfo.Name, f.Type.Name)
-		} else {
-			result = jsType
+func (m *BoundMethod) JSOutputs() (outputs []*Parameter) {
+	for _, output := range m.Results() {
+		if types.TypeString(output.Var.Type(), nil) == "error" {
+			continue
 		}
-	} else {
-		// get the relative package directory
-		result = fmt.Sprintf("%s%s", externalPkgInfo.Name, f.Type.Name)
+		outputs = append(outputs, output)
 	}
 
-	if !ast.IsExported(f.Name) {
-		result += " // Warning: this is unexported in the Go struct."
+	return outputs
+}
+
+type Service struct {
+	*types.TypeName
+	Methods []*BoundMethod
+}
+
+func ParseMethods(service *types.TypeName) (methods []*BoundMethod) {
+	if named, ok := service.Type().(*types.Named); ok {
+		for i := 0; i < named.NumMethods(); i++ {
+			fn := named.Method(i)
+			if !fn.Exported() {
+				continue
+			}
+
+			packagePath := service.Pkg().Path()
+			// use "main" as package path if service is inside main package,
+			// because reflect.Type.PkgPath() == "main"
+			// https://github.com/golang/go/issues/8559
+			if service.Pkg().Name() == "main" {
+				packagePath = "main"
+			}
+
+			fqn := fmt.Sprintf("%s.%s.%s", packagePath, service.Name(), fn.Name())
+
+			id, err := hash.Fnv(fqn)
+			if err != nil {
+				panic("Failed to hash fqn")
+			}
+
+			method := &BoundMethod{
+				Func: fn,
+				FQN:  fqn,
+				ID:   id,
+			}
+
+			interfaceFound := false
+			for param := range method.FindModels(nil, false) {
+				if types.IsInterface(param.Obj().Type()) {
+					interfaceFound = true
+					filteredWarning.Printfln("interface as parameter: ignoring %s.%s with interface %s", service.Name(), param.Obj().Name(), param.String())
+				}
+			}
+			if interfaceFound {
+				continue
+			}
+
+			methods = append(methods, method)
+		}
+	}
+	return
+}
+
+type Package struct {
+	*types.Package
+	files            map[string]*ast.File
+	project          *Project
+	services         []*Service
+	models           *Models
+	anonymousStructs map[string]string
+	doc              *Doc
+}
+
+func ParsePackages(project *Project) ([]*Package, error) {
+	requiredPackages := make(map[*types.Package]*Package)
+
+	// helper function to add new packages
+	getOrCreatePackage := func(tPkg *types.Package) *Package {
+		if _, ok := requiredPackages[tPkg]; !ok {
+			requiredPackages[tPkg] = &Package{
+				Package:          tPkg,
+				files:            make(map[string]*ast.File),
+				project:          project,
+				services:         []*Service{},
+				models:           NewModels(),
+				anonymousStructs: make(map[string]string),
+			}
+		}
+		return requiredPackages[tPkg]
 	}
 
-	return result
-}
-
-func (f *Field) DefaultValue() string {
-	// Return the default value of the typescript version of the type as a string
-	switch f.Type.Name {
-	case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uintptr", "float32", "float64", "uint64":
-		return "0"
-	case "string":
-		return `""`
-	case "bool":
-		return "false"
-	default:
-		return "null"
+	// add services to packages
+	services, err := ParseServices(project.pPkgs)
+	if err != nil {
+		return nil, err
 	}
+	for _, service := range services {
+		tPkg := service.Pkg()
+		pkg := getOrCreatePackage(tPkg)
+		pkg.addService(service)
+	}
+
+	// find all required models
+	allModels := FindModels(lo.Values(requiredPackages))
+	for model := range allModels {
+		tPkg := model.Obj().Pkg()
+		getOrCreatePackage(tPkg)
+	}
+
+	result := lo.Values(requiredPackages)
+
+	// load documentation for each package
+	for _, pPkg := range project.pPkgs {
+		if pkg, ok := requiredPackages[pPkg.Types]; ok {
+			files := make(map[string]*ast.File)
+			for i, file := range pPkg.Syntax {
+				files[pPkg.CompiledGoFiles[i]] = file
+			}
+			pkg.doc = NewDoc(pkg.Path(), &ast.Package{
+				Files: files,
+				Name:  pkg.Name(),
+			})
+		}
+	}
+
+	pkgsNoDoc := lo.Filter(result, func(pkg *Package, i int) bool { return pkg.doc == nil })
+	patterns := lo.Map(pkgsNoDoc, func(pkg *Package, i int) string { return pkg.Path() })
+	astPkgs, err := LoadAstPackages(patterns...)
+	if err != nil {
+		return result, err
+	}
+	for i, pattern := range patterns {
+		pkgsNoDoc[i].doc = NewDoc(pkgsNoDoc[i].Path(), astPkgs[pattern])
+	}
+
+	// add models to packages
+	// must be done after documentation is loaded, otherwise EnumDef.Consts can not be resolved
+	for model := range allModels {
+		tPkg := model.Obj().Pkg()
+		pkg := getOrCreatePackage(tPkg)
+		pkg.addModel(model, project.marshaler, project.textMarshaler)
+	}
+
+	return result, nil
 }
 
-type ConstDef struct {
-	Name        string
-	DocComments []string
-	Value       string
+func (p *Package) addService(s *Service) {
+	p.services = append(p.services, s)
 }
 
-type TypeDef struct {
-	Name           string
-	DocComments    []string
-	Type           string
-	Consts         []*ConstDef
-	ShouldGenerate bool
+func (p *Package) anonymousStructID(s *types.Struct) string {
+	key := s.String()
+
+	if _, ok := p.anonymousStructs[key]; !ok {
+		p.anonymousStructs[key] = "$anon" + strconv.Itoa(len(p.anonymousStructs)+1)
+	}
+	return p.anonymousStructs[key]
 }
 
-func (t *TypeDef) GeneratedName() string {
-	return t.Name + "Enum"
-}
+// Credit: https://stackoverflow.com/a/70999797/3140799
+func (p *Package) constantsOf(enum *types.Named) []*ConstDef {
+	values := []*ConstDef{}
 
-type ParsedPackage struct {
-	Pkg         *ast.Package
-	Name        string
-	Path        string
-	Dir         string
-	StructCache map[structName]*StructDef
-	TypeCache   map[string]*TypeDef
-}
+	enumType, ok := p.doc.Types[enum.Obj().Name()]
+	if !ok {
+		return values
+	}
 
-type Project struct {
-	packageCache             map[string]*ParsedPackage
-	outputDirectory          string
-	Path                     string
-	BoundMethods             map[packagePath]map[structName][]*BoundMethod
-	Models                   map[packagePath]map[structName]*StructDef
-	Types                    map[packagePath]map[structName]*TypeDef
-	anonymousStructIDCounter int
-	Stats                    Stats
+	for _, c := range enumType.Consts {
+		for _, spec := range c.Decl.Specs {
+			if spec, ok := spec.(*ast.ValueSpec); ok {
+				for i, value := range spec.Values {
+					if value, ok := value.(*ast.BasicLit); ok {
+						values = append(values, &ConstDef{Value: value.Value, Name: spec.Names[i].Name})
+					}
+				}
+			}
+		}
+	}
+	return values
 }
 
 type Stats struct {
 	NumPackages int
-	NumStructs  int
+	NumServices int
 	NumMethods  int
-	NumEnums    int
 	NumModels   int
+	NumEnums    int
+	NumAliases  int
 	StartTime   time.Time
 	EndTime     time.Time
 }
 
-func ParseProject(projectPath string) (*Project, error) {
-	absPath, err := filepath.Abs(projectPath)
-	if err != nil {
-		return nil, err
-	}
-	result := &Project{
-		Path:         absPath,
-		BoundMethods: make(map[packagePath]map[structName][]*BoundMethod),
-		packageCache: make(map[string]*ParsedPackage),
-	}
-	result.Stats.StartTime = time.Now()
-	pkgs, err := result.parseDirectory(projectPath)
-	if err != nil {
-		return nil, err
-	}
-	err = result.findApplicationNewCalls(pkgs)
-	if err != nil {
-		return nil, err
-	}
-	for _, pkg := range result.packageCache {
-		if len(pkg.StructCache) > 0 {
-			if result.Models == nil {
-				result.Models = make(map[packagePath]map[structName]*StructDef)
+type Project struct {
+	pkgs     []*Package
+	pPkgs    []*packages.Package
+	options  *flags.GenerateBindingsOptions
+	Stats    Stats
+	basePath string
+	baseName string
+
+	marshaler     *types.Interface
+	textMarshaler *types.Interface
+}
+
+func loadMarshalerInterfaces(jsonPkg *packages.Package) (*types.Interface, *types.Interface, error) {
+	var marshaler, textMarshaler *types.Interface
+
+	for _, t := range jsonPkg.TypesInfo.Defs {
+		switch obj := t.(type) {
+		case *types.TypeName:
+			if i, ok := obj.Type().Underlying().(*types.Interface); ok {
+				if obj.Name() == "Marshaler" {
+					marshaler = i
+				} else if obj.Name() == "TextMarshaler" {
+					textMarshaler = i
+				}
 			}
-			result.Models[pkg.Path] = pkg.StructCache
 		}
 	}
-	return result, nil
+	if marshaler == nil {
+		return nil, nil, errors.New("could not find interface json.Marshaler")
+	}
+	if textMarshaler == nil {
+		return nil, nil, errors.New("could not find interface encoding.TextMarshaler")
+	}
+	return marshaler, textMarshaler, nil
+}
+
+func ParseProject(options *flags.GenerateBindingsOptions) (*Project, error) {
+	startTime := time.Now()
+
+	buildFlags, err := options.BuildFlags()
+	if err != nil {
+		return nil, err
+	}
+
+	pPkgs, err := LoadPackages(buildFlags, true,
+		options.ProjectDirectory, JsonPkgPath,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if n := packages.PrintErrors(pPkgs); n > 0 {
+		return nil, errors.New("error while loading packages")
+	}
+
+	// load json interfaces
+	jsonIndex := slices.IndexFunc(pPkgs, func(pkg *packages.Package) bool { return pkg.PkgPath == JsonPkgPath })
+	if jsonIndex == -1 {
+		return nil, fmt.Errorf("LoadPackages() did not load package %s", JsonPkgPath)
+	}
+	marshaler, textMarshaler, err := loadMarshalerInterfaces(pPkgs[jsonIndex])
+	if err != nil {
+		return nil, err
+	}
+
+	// retrive base of package paths
+	baseIndex := -1
+	basePath := options.BasePath
+	if basePath == "." || basePath == "./" {
+		baseIndex = slices.IndexFunc(pPkgs, func(pkg *packages.Package) bool {
+			absDir, _ := filepath.Abs(options.ProjectDirectory)
+
+			if pkg.PkgPath == options.ProjectDirectory || pkg.PkgPath == absDir {
+				return true
+			}
+			if len(pkg.CompiledGoFiles) > 0 && filepath.Dir(pkg.CompiledGoFiles[0]) == absDir {
+				return true
+			}
+			return false
+		})
+		if baseIndex == -1 {
+			return nil, fmt.Errorf("package not found: %s", options.ProjectDirectory)
+		}
+		basePath = pPkgs[baseIndex].PkgPath
+	}
+
+	// retrive base name
+	baseName := ""
+	if options.UseBaseName {
+		if baseIndex != -1 {
+			baseName = pPkgs[baseIndex].Types.Name()
+		} else {
+			pterm.Warning.Printfln("base name not found: UseBaseName can only be used with BasePath=\".\"")
+		}
+	}
+
+	return &Project{
+		pPkgs:         pPkgs,
+		options:       options,
+		marshaler:     marshaler,
+		textMarshaler: textMarshaler,
+		Stats: Stats{
+			StartTime: startTime,
+		},
+		basePath: basePath,
+		baseName: baseName,
+	}, nil
 }
 
 func GenerateBindingsAndModels(options *flags.GenerateBindingsOptions) (*Project, error) {
-	p, err := ParseProject(options.ProjectDirectory)
+	p, err := ParseProject(options)
 	if err != nil {
 		return p, err
 	}
 
-	if p.BoundMethods == nil {
-		return p, nil
+	p.pkgs, err = ParsePackages(p)
+	if err != nil {
+		return p, err
 	}
+	p.Stats.NumPackages = len(p.pkgs)
+
+	if NumMethods := len(p.BoundMethods()); NumMethods == 0 {
+		return p, nil
+	} else {
+		p.Stats.NumMethods += NumMethods
+	}
+
 	err = os.MkdirAll(options.OutputDirectory, 0755)
 	if err != nil {
 		return p, err
 	}
 
-	p.outputDirectory = options.OutputDirectory
-
-	for _, pkg := range p.BoundMethods {
-		for _, boundMethods := range pkg {
-			p.Stats.NumMethods += len(boundMethods)
-		}
+	// generate bindings
+	generatedMethods, err := p.GenerateBindings()
+	if err != nil {
+		return p, err
 	}
-
-	generatedMethods := p.GenerateBindings(p.BoundMethods, options.ModelsFilename, options.UseIDs, options.TS, options.UseBundledRuntime)
 	for pkgDir, structs := range generatedMethods {
 		// Write the directory
 		err = os.MkdirAll(filepath.Join(options.OutputDirectory, pkgDir), 0755)
@@ -369,7 +487,7 @@ func GenerateBindingsAndModels(options *flags.GenerateBindingsOptions) (*Project
 		}
 		// Write the files
 		for structName, text := range structs {
-			p.Stats.NumStructs++
+			p.Stats.NumServices++
 			var filename string
 			if options.TS {
 				filename = structName + ".ts"
@@ -383,33 +501,28 @@ func GenerateBindingsAndModels(options *flags.GenerateBindingsOptions) (*Project
 		}
 	}
 
-	p.Stats.NumModels = len(p.Models)
-	p.Stats.NumEnums = len(p.Types)
-
-	// Generate Models
-	if len(p.Models) > 0 {
-		generatedModels, err := p.GenerateModels(p.Models, p.Types, options)
-		if err != nil {
+	// generate models
+	generatedModels, err := p.GenerateModels()
+	if err != nil {
+		return p, err
+	}
+	for pkgDir, text := range generatedModels {
+		// Write the directory
+		err = os.MkdirAll(filepath.Join(options.OutputDirectory, pkgDir), 0755)
+		if err != nil && !os.IsExist(err) {
 			return p, err
 		}
-		for pkgDir, text := range generatedModels {
-			// Write the directory
-			err = os.MkdirAll(filepath.Join(options.OutputDirectory, pkgDir), 0755)
-			if err != nil && !os.IsExist(err) {
-				return p, err
-			}
-			// Write the file
-			var filename string
-			if options.TS {
-				filename = options.ModelsFilename + ".ts"
-			} else {
-				filename = options.ModelsFilename + ".js"
-			}
-			err = os.WriteFile(filepath.Join(options.OutputDirectory, pkgDir, filename), []byte(text), 0644)
+		// Write the file
+		var filename string
+		if options.TS {
+			filename = options.ModelsFilename + ".ts"
+		} else {
+			filename = options.ModelsFilename + ".js"
 		}
-		if err != nil {
-			return p, err
-		}
+		err = os.WriteFile(filepath.Join(options.OutputDirectory, pkgDir, filename), []byte(text), 0644)
+	}
+	if err != nil {
+		return p, err
 	}
 
 	p.Stats.EndTime = time.Now()
@@ -417,802 +530,45 @@ func GenerateBindingsAndModels(options *flags.GenerateBindingsOptions) (*Project
 	return p, nil
 }
 
-func (p *Project) parseDirectory(dir string) (map[string]*ParsedPackage, error) {
-	if p.packageCache[dir] != nil {
-		return map[string]*ParsedPackage{dir: p.packageCache[dir]}, nil
-	}
-	// Parse the directory
-	fset := token.NewFileSet()
-	if dir == "." || dir == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, err
-		}
-		dir = cwd
-	}
-	pkgs, err := parser.ParseDir(fset, dir, nil, parser.ParseComments)
+func ParseServices(pkgs []*packages.Package) (services []*Service, err error) {
+	found, err := FindServices(pkgs)
 	if err != nil {
-		return nil, err
-	}
-	var result = make(map[string]*ParsedPackage)
-	p.Stats.NumPackages = len(pkgs)
-	for packageName, pkg := range pkgs {
-		parsedPackage := &ParsedPackage{
-			Pkg:         pkg,
-			Name:        packageName,
-			Path:        packageName,
-			Dir:         getDirectoryForPackage(pkg),
-			StructCache: make(map[structName]*StructDef),
-			TypeCache:   make(map[string]*TypeDef),
-		}
-		p.parseTypes(map[string]*ParsedPackage{packageName: parsedPackage})
-		p.packageCache[packageName] = parsedPackage
-		result[packageName] = parsedPackage
-	}
-	return result, nil
-}
-
-func (p *Project) findApplicationNewCalls(pkgs map[string]*ParsedPackage) (err error) {
-
-	var callFound bool
-
-	p.parseTypes(pkgs)
-
-	for _, pkg := range pkgs {
-		thisPackage := pkg.Pkg
-		// Iterate through the package's files
-		for _, file := range thisPackage.Files {
-			// Use an ast.Inspector to find the calls to application.New
-			ast.Inspect(file, func(n ast.Node) bool {
-				// Check for const declaration
-				genDecl, ok := n.(*ast.GenDecl)
-				if ok {
-					switch genDecl.Tok {
-					case token.TYPE:
-						var comments []string
-						if genDecl.Doc != nil {
-							comments = CommentGroupToText(genDecl.Doc)
-						}
-						for _, spec := range genDecl.Specs {
-							if typeSpec, ok := spec.(*ast.TypeSpec); ok {
-								p.parseTypeDeclaration(typeSpec, pkg, comments)
-							}
-						}
-					case token.CONST:
-						p.parseConstDeclaration(genDecl, pkg)
-					default:
-					}
-					return true
-
-				}
-
-				// Check if the node is a call expression
-				callExpr, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-
-				// Check if the function being called is "application.New"
-				selExpr, ok := callExpr.Fun.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				if selExpr.Sel.Name != "New" {
-					return true
-				}
-				if id, ok := selExpr.X.(*ast.Ident); !ok || id.Name != "application" {
-					return true
-				}
-
-				// Check there is only 1 argument
-				if len(callExpr.Args) != 1 {
-					return true
-				}
-
-				// Check argument 1 is a struct literal
-				structLit, ok := callExpr.Args[0].(*ast.CompositeLit)
-				if !ok {
-					return true
-				}
-
-				// Check struct literal is of type "application.Options"
-				selectorExpr, ok := structLit.Type.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				if selectorExpr.Sel.Name != "Options" {
-					return true
-				}
-				if id, ok := selectorExpr.X.(*ast.Ident); !ok || id.Name != "application" {
-					return true
-				}
-
-				for _, elt := range structLit.Elts {
-					// Find the "Bind" field
-					kvExpr, ok := elt.(*ast.KeyValueExpr)
-					if !ok {
-						continue
-					}
-					if id, ok := kvExpr.Key.(*ast.Ident); !ok || id.Name != "Bind" {
-						continue
-					}
-					// Check the value is a slice of interfaces
-					sliceExpr, ok := kvExpr.Value.(*ast.CompositeLit)
-					if !ok {
-						continue
-					}
-					var arrayType *ast.ArrayType
-					if arrayType, ok = sliceExpr.Type.(*ast.ArrayType); !ok {
-						continue
-					}
-
-					// Check array type is of type "interface{}"
-					_, isInterfaceType := arrayType.Elt.(*ast.InterfaceType)
-					if !isInterfaceType {
-						// Check it's an "any" type
-						ident, isAnyType := arrayType.Elt.(*ast.Ident)
-						if !isAnyType {
-							continue
-						}
-						if ident.Name != "any" {
-							continue
-						}
-					}
-					callFound = true
-					// Iterate through the slice elements
-					for _, elt := range sliceExpr.Elts {
-						result, shouldContinue := p.parseBoundExpression(elt, pkg)
-						if shouldContinue {
-							continue
-						}
-						return result
-
-					}
-				}
-
-				return true
-			})
-		}
-		p.addTypes(pkg.Path, pkg.TypeCache)
-		if !callFound {
-			return ErrNoBindingsFound
-		}
-	}
-	return nil
-}
-
-func (p *Project) parseBoundUnaryExpression(unaryExpr *ast.UnaryExpr, pkg *ParsedPackage) (bool, bool) {
-	// Check the unary expression is a composite lit
-
-	switch t := unaryExpr.X.(type) {
-	case *ast.CompositeLit:
-		return p.parseBoundCompositeLit(t, pkg)
-	}
-	return false, true
-
-}
-
-func (p *Project) addBoundMethods(packagePath string, name string, boundMethods []*BoundMethod) {
-	_, ok := p.BoundMethods[packagePath]
-	if !ok {
-		p.BoundMethods[packagePath] = make(map[structName][]*BoundMethod)
-	}
-	p.BoundMethods[packagePath][name] = boundMethods
-}
-
-func (p *Project) parseBoundStructMethods(name string, pkg *ParsedPackage) error {
-	var methods []*BoundMethod
-	// Iterate over all files in the package
-	for _, file := range pkg.Pkg.Files {
-		// Iterate over all declarations in the file
-		for _, decl := range file.Decls {
-			// Check if the declaration is a type declaration
-			if funcDecl, ok := decl.(*ast.FuncDecl); ok && funcDecl.Recv != nil && funcDecl.Name.IsExported() {
-				var ident *ast.Ident
-				var ok bool
-
-				switch funcDecl.Recv.List[0].Type.(type) {
-				case *ast.StarExpr:
-					recv := funcDecl.Recv.List[0].Type.(*ast.StarExpr)
-					ident, ok = recv.X.(*ast.Ident)
-				case *ast.Ident:
-					ident, ok = funcDecl.Recv.List[0].Type.(*ast.Ident)
-				}
-				if ok && ident.Name == name {
-					fqn := fmt.Sprintf("%s.%s.%s", pkg.Path, name, funcDecl.Name.Name)
-
-					var alias *uint32
-					var err error
-					// Check for the text `wails:methodID <integer>`
-					if funcDecl.Doc != nil {
-						for _, docstring := range funcDecl.Doc.List {
-							if strings.Contains(docstring.Text, "//wails:methodID") {
-								idString := strings.TrimSpace(strings.TrimPrefix(docstring.Text, "//wails:methodID"))
-								parsedID, err := strconv.ParseUint(idString, 10, 32)
-								if err != nil {
-									return fmt.Errorf("invalid value in `wails:methodID` directive: '%s'. Expected a valid uint32 value", idString)
-								}
-								alias = lo.ToPtr(uint32(parsedID))
-								break
-							}
-						}
-					}
-					id, err := hash.Fnv(fqn)
-					if err != nil {
-						return err
-					}
-
-					method := &BoundMethod{
-						Package:    pkg.Path,
-						PackageDir: pkg.Dir,
-						ID:         id,
-						Name:       funcDecl.Name.Name,
-						DocComment: strings.TrimSpace(funcDecl.Doc.Text()),
-						Alias:      alias,
-					}
-
-					if funcDecl.Type.Params != nil {
-						method.Inputs = p.parseParameters(funcDecl.Type.Params, pkg)
-					}
-					if funcDecl.Type.Results != nil {
-						method.Outputs = p.parseParameters(funcDecl.Type.Results, pkg)
-					}
-
-					methods = append(methods, method)
-				}
-
-			}
-		}
-	}
-	p.addBoundMethods(pkg.Path, name, methods)
-	return nil
-}
-
-func (p *Project) addTypes(packagePath string, types map[string]*TypeDef) {
-	if types == nil || len(types) == 0 {
 		return
 	}
-	if p.Types == nil {
-		p.Types = make(map[string]map[string]*TypeDef)
+
+	for _, service := range found {
+		services = append(services, &Service{
+			TypeName: service,
+			Methods:  ParseMethods(service),
+		})
 	}
-	_, ok := p.Types[packagePath]
-	if !ok {
-		p.Types[packagePath] = make(map[string]*TypeDef)
-	}
-	p.Types[packagePath] = types
+	return
 }
 
-func (p *Project) parseParameters(params *ast.FieldList, pkg *ParsedPackage) []*Parameter {
-	var result []*Parameter
-	for _, field := range params.List {
-		var theseFields []*Parameter
-		if len(field.Names) > 0 {
-			for _, name := range field.Names {
-				theseFields = append(theseFields, &Parameter{
-					Name: name.Name,
-				})
-			}
-		} else {
-			theseFields = append(theseFields, &Parameter{
-				Name: "",
-			})
-		}
-		// loop over fields
-		for _, thisField := range theseFields {
-			thisField.Type = p.parseParameterType(field, pkg)
-			result = append(result, thisField)
-		}
+func (p *Project) PackageDir(pkg *types.Package) string {
+	if p.baseName != "" && pkg.Path() == p.basePath {
+		return p.baseName
 	}
-	return result
-}
 
-func (p *Project) parseParameterType(field *ast.Field, pkg *ParsedPackage) *ParameterType {
-	result := &ParameterType{
-		Package: pkg.Path,
-	}
-	result.Name = getTypeString(field.Type)
-	switch t := field.Type.(type) {
-	case *ast.Ident:
-		result.IsStruct = isStructType(t)
-		if !result.IsStruct {
-			// Check if it's a type alias
-			typeDef, ok := pkg.TypeCache[t.Name]
-			if ok {
-				typeDef.ShouldGenerate = true
-				result.IsEnum = true
-			}
-		}
-	case *ast.StarExpr:
-		result = p.parseParameterType(&ast.Field{Type: t.X}, pkg)
-		result.IsPointer = true
-	case *ast.StructType:
-		result.IsStruct = true
-		if result.Name == "" {
-			// Anonymous struct
-			result.Name = p.anonymousStructID()
-			// Create a new struct definition
-			result := &StructDef{
-				Name:        result.Name,
-				DocComments: CommentGroupToText(field.Doc),
-			}
-			pkg.StructCache[result.Name] = result
-			// Parse the fields
-			result.Fields = p.parseStructFields(&ast.StructType{
-				Fields: t.Fields,
-			}, pkg)
-			_ = result
-		}
-	case *ast.SelectorExpr:
-		extPackage, err := p.getParsedPackageFromName(t.X.(*ast.Ident).Name, pkg)
+	if strings.HasPrefix(pkg.Path(), p.basePath) {
+		path, err := filepath.Rel(p.basePath, pkg.Path())
 		if err != nil {
-			log.Fatal(err)
+			panic(err)
 		}
-		result.IsStruct = p.getStructDef(t.Sel.Name, extPackage)
-		if !result.IsStruct {
-			// Check if it's a type alias
-			typeDef, ok := extPackage.TypeCache[t.Sel.Name]
-			if ok {
-				typeDef.ShouldGenerate = true
-				result.IsEnum = true
-			}
-		}
-		result.Package = extPackage.Path
-	case *ast.ArrayType:
-		result.IsSlice = true
-		result.IsStruct = isStructType(t.Elt)
-	case *ast.MapType:
-		tempfield := &ast.Field{Type: t.Key}
-		result.MapKey = p.parseParameterType(tempfield, pkg)
-		tempfield.Type = t.Value
-		result.MapValue = p.parseParameterType(tempfield, pkg)
-	default:
+		return filepath.ToSlash(path)
 	}
-	if result.IsStruct {
-		p.getStructDef(result.Name, pkg)
-		if result.Package == "" {
-			result.Package = pkg.Path
-		}
-	}
-	return result
+	return pkg.Path()
 }
 
-func (p *Project) getStructDef(name string, pkg *ParsedPackage) bool {
-	_, ok := pkg.StructCache[name]
-	if ok {
-		return true
-	}
-	// Iterate over all files in the package
-	for _, file := range pkg.Pkg.Files {
-		// Iterate over all declarations in the file
-		for _, decl := range file.Decls {
-			// Check if the declaration is a type declaration
-			if typeDecl, ok := decl.(*ast.GenDecl); ok {
-				// Check if the type declaration is a struct type
-				if typeDecl.Tok == token.TYPE {
-					for _, spec := range typeDecl.Specs {
-						if typeSpec, ok := spec.(*ast.TypeSpec); ok {
-							if structType, ok := typeSpec.Type.(*ast.StructType); ok {
-								if typeSpec.Name.Name == name {
-									result := &StructDef{
-										Name:        name,
-										DocComments: CommentGroupToText(typeDecl.Doc),
-									}
-									pkg.StructCache[name] = result
-									result.Fields = p.parseStructFields(structType, pkg)
-									return true
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	return false
-}
-
-func (p *Project) parseStructFields(structType *ast.StructType, pkg *ParsedPackage) []*Field {
-	var result []*Field
-	for _, field := range structType.Fields.List {
-		var theseFields []*Field
-		if len(field.Names) > 0 {
-			for _, name := range field.Names {
-				theseFields = append(theseFields, &Field{
-					Project: p,
-					Name:    name.Name,
-				})
-			}
-		} else {
-			theseFields = append(theseFields, &Field{
-				Project: p,
-				Name:    "",
-			})
-		}
-		// loop over fields
-		for _, thisField := range theseFields {
-			paramType := p.parseParameterType(field, pkg)
-			if paramType.IsStruct {
-				_, ok := pkg.StructCache[paramType.Name]
-				if !ok {
-					p.getStructDef(paramType.Name, pkg)
-				}
-			}
-			if paramType.Package == "" {
-				paramType.Package = pkg.Path
-			}
-			thisField.Type = paramType
-			result = append(result, thisField)
-		}
-	}
-	return result
-}
-
-func (p *Project) getParsedPackageFromName(packageName string, currentPackage *ParsedPackage) (*ParsedPackage, error) {
-	for _, file := range currentPackage.Pkg.Files {
-		for _, imp := range file.Imports {
-			path, err := strconv.Unquote(imp.Path.Value)
-			if err != nil {
-				return nil, err
-			}
-			_, lastPathElement := filepath.Split(path)
-			if imp.Name != nil && imp.Name.Name == packageName || lastPathElement == packageName {
-				// Get the directory for the package
-				dir, err := getPackageDir(path)
-				if err != nil {
-					return nil, err
-				}
-				pkg, err := p.getPackageFromPath(dir, path)
-				if err != nil {
-					return nil, err
-				}
-				result := &ParsedPackage{
-					Pkg:         pkg,
-					Name:        packageName,
-					Path:        path,
-					Dir:         dir,
-					StructCache: make(map[string]*StructDef),
-					TypeCache:   make(map[string]*TypeDef),
-				}
-				p.packageCache[path] = result
-
-				// Parse types
-				p.parseTypes(map[string]*ParsedPackage{path: result})
-
-				return result, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("package %s not found in %s", packageName, currentPackage.Name)
-}
-
-func getPackageDir(importPath string) (string, error) {
-	pkg, err := build.Import(importPath, "", build.FindOnly)
-	if err != nil {
-		return "", err
-	}
-	return pkg.Dir, nil
-}
-
-func (p *Project) getPackageFromPath(packagedir string, packagepath string) (*ast.Package, error) {
-	impPkg, err := parser.ParseDir(token.NewFileSet(), packagedir, nil, parser.AllErrors|parser.ParseComments)
-	if err != nil {
-		return nil, err
-	}
-	for impName, impPkg := range impPkg {
-		if impName == "main" {
-			continue
-		}
-		return impPkg, nil
-	}
-	return nil, fmt.Errorf("package not found in imported package %s", packagepath)
-}
-
-func (p *Project) anonymousStructID() string {
-	p.anonymousStructIDCounter++
-	return fmt.Sprintf("anon%d", p.anonymousStructIDCounter)
-}
-
-func (p *Project) parseBoundExpression(elt ast.Expr, pkg *ParsedPackage) (bool, bool) {
-
-	switch t := elt.(type) {
-	case *ast.UnaryExpr:
-		return p.parseBoundUnaryExpression(t, pkg)
-	case *ast.Ident:
-		return p.parseBoundIdent(t, pkg)
-	case *ast.CallExpr:
-		return p.parseBoundCallExpression(t, pkg)
-	default:
-		println("unhandled expression type", reflect.TypeOf(t).String())
-	}
-
-	return false, false
-}
-
-func (p *Project) parseBoundIdent(ident *ast.Ident, pkg *ParsedPackage) (bool, bool) {
-	if ident.Obj == nil {
-		return false, true
-	}
-	switch t := ident.Obj.Decl.(type) {
-	//case *ast.StructType:
-	//	return p.parseBoundStruct(t, pkg)
-	case *ast.TypeSpec:
-		return p.parseBoundTypeSpec(t, pkg)
-	case *ast.AssignStmt:
-		return p.parseBoundAssignment(t, pkg)
-	default:
-		println("unhandled ident type", reflect.TypeOf(t).String())
-	}
-	return false, false
-}
-
-func (p *Project) parseBoundAssignment(assign *ast.AssignStmt, pkg *ParsedPackage) (bool, bool) {
-	return p.parseBoundExpression(assign.Rhs[0], pkg)
-}
-
-func (p *Project) parseBoundCompositeLit(lit *ast.CompositeLit, pkg *ParsedPackage) (bool, bool) {
-
-	switch t := lit.Type.(type) {
-	case *ast.StructType:
-		//return p.parseBoundStructType(t, pkg)
-		return false, true
-	case *ast.Ident:
-		err := p.parseBoundStructMethods(t.Name, pkg)
-		if err != nil {
-			return true, false
-		}
-		return false, true
-	case *ast.SelectorExpr:
-		return p.parseBoundSelectorExpression(t, pkg)
-	}
-
-	return false, true
-}
-
-func (p *Project) parseBoundSelectorExpression(selector *ast.SelectorExpr, pkg *ParsedPackage) (bool, bool) {
-
-	switch t := selector.X.(type) {
-	case *ast.Ident:
-		// Look up the package
-		var parsedPackage *ParsedPackage
-		parsedPackage, err := p.getParsedPackageFromName(t.Name, pkg)
-		if err != nil {
-			return true, false
-		}
-		err = p.parseBoundStructMethods(selector.Sel.Name, parsedPackage)
-		if err != nil {
-			return true, false
-		}
-		return false, true
-	default:
-		println("unhandled selector type", reflect.TypeOf(t).String())
-	}
-	return false, true
-}
-
-func (p *Project) parseBoundCallExpression(callExpr *ast.CallExpr, pkg *ParsedPackage) (bool, bool) {
-
-	// Check if this call returns a struct pointer
-	switch t := callExpr.Fun.(type) {
-	case *ast.Ident:
-		if t.Obj == nil {
-			return false, true
-		}
-		switch t := t.Obj.Decl.(type) {
-		case *ast.FuncDecl:
-			return p.parseBoundFuncDecl(t, pkg)
-		}
-
-	case *ast.SelectorExpr:
-		// Get package for selector
-		var parsedPackage *ParsedPackage
-		parsedPackage, err := p.getParsedPackageFromName(t.X.(*ast.Ident).Name, pkg)
-		if err != nil {
-			return true, false
-		}
-		// Get function from package
-		var extFundDecl *ast.FuncDecl
-		extFundDecl, err = p.getFunctionFromName(t.Sel.Name, parsedPackage)
-		if err != nil {
-			return true, false
-		}
-		return p.parseBoundFuncDecl(extFundDecl, parsedPackage)
-	default:
-		println("unhandled call type", reflect.TypeOf(t).String())
-	}
-
-	return false, true
-}
-
-func (p *Project) parseBoundFuncDecl(t *ast.FuncDecl, pkg *ParsedPackage) (bool, bool) {
-	if t.Type.Results == nil {
-		return false, true
-	}
-	if len(t.Type.Results.List) != 1 {
-		return false, true
-	}
-	switch t := t.Type.Results.List[0].Type.(type) {
-	case *ast.StarExpr:
-		return p.parseBoundExpression(t.X, pkg)
-	default:
-		println("Unhandled funcdecl type", reflect.TypeOf(t).String())
-	}
-	return false, false
-}
-
-func (p *Project) parseBoundTypeSpec(typeSpec *ast.TypeSpec, pkg *ParsedPackage) (bool, bool) {
-	switch t := typeSpec.Type.(type) {
-	case *ast.StructType:
-		err := p.parseBoundStructMethods(typeSpec.Name.Name, pkg)
-		if err != nil {
-			return true, false
-		}
-	default:
-		println("unhandled type spec type", reflect.TypeOf(t).String())
-	}
-	return false, true
-}
-
-func (p *Project) getFunctionFromName(name string, parsedPackage *ParsedPackage) (*ast.FuncDecl, error) {
-	for _, f := range parsedPackage.Pkg.Files {
-		for _, decl := range f.Decls {
-			switch t := decl.(type) {
-			case *ast.FuncDecl:
-				if t.Name.Name == name {
-					return t, nil
-				}
-			}
-		}
-	}
-	return nil, fmt.Errorf("function not found")
-}
-
-func (p *Project) parseTypeDeclaration(decl *ast.TypeSpec, pkg *ParsedPackage, comments []string) {
-	switch t := decl.Type.(type) {
-	case *ast.Ident:
-		switch t.Name {
-		case "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64",
-			"uintptr", "float32", "float64", "string", "bool":
-			// Store this in the type cache
-			pkg.TypeCache[decl.Name.Name] = &TypeDef{
-				Name:        decl.Name.Name,
-				Type:        t.Name,
-				DocComments: TrimSlice(comments),
-			}
-		}
-	}
-}
-
-func (p *Project) parseConstDeclaration(decl *ast.GenDecl, pkg *ParsedPackage) {
-	// Check if the type of the constant is in the type cache and if it doesn't exist, return
-	var latestValues []ast.Expr
-
-	for _, spec := range decl.Specs {
-		valueSpec, ok := spec.(*ast.ValueSpec)
-		if !ok {
-			continue
-		}
-		// Extract the Type
-		typeString := getTypeString(valueSpec.Type)
-		if typeString == "" {
-			continue
-		}
-		// Check if the type is in the type cache
-		typeDecl, ok := pkg.TypeCache[typeString]
-		if !ok {
-			continue
-		}
-
-		// Get the latest values
-		if len(valueSpec.Values) > 0 {
-			latestValues = valueSpec.Values
-		}
-
-		// Iterate over the names
-		for index, name := range valueSpec.Names {
-			constDecl := &ConstDef{
-				Name:  name.Name,
-				Value: typeString,
-			}
-
-			// Get the value
-			if len(latestValues) > 0 {
-				switch t := latestValues[index].(type) {
-				case *ast.BasicLit:
-					constDecl.Value = t.Value
-				case *ast.Ident:
-					constDecl.Value = t.Name
-				}
-			}
-
-			if valueSpec.Doc != nil {
-				constDecl.DocComments = CommentGroupToText(valueSpec.Doc)
-			}
-			typeDecl.Consts = append(typeDecl.Consts, constDecl)
-		}
-	}
-}
-
-func (p *Project) RelativePackageDir(path string) string {
-
-	// Get the package details
-	pkgInfo, ok := p.packageCache[path]
-	if !ok {
-		panic("package not found: " + path)
-	}
-
-	result := filepath.ToSlash(strings.TrimPrefix(pkgInfo.Dir, p.Path))
-	if result == "" {
-		return "main"
-	}
-	// Remove the leading slash
-	if result[0] == '/' || result[0] == '\\' {
-		result = result[1:]
-	}
-	return result
-}
-
-func (p *Project) parseTypes(pkgs map[string]*ParsedPackage) {
-	for _, pkg := range pkgs {
-		thisPackage := pkg.Pkg
-		// Iterate through the package's files
-		for _, file := range thisPackage.Files {
-			// Use an ast.Inspector to find the calls to application.New
-			ast.Inspect(file, func(n ast.Node) bool {
-				// Check for const declaration
-				genDecl, ok := n.(*ast.GenDecl)
-				if ok {
-					switch genDecl.Tok {
-					case token.TYPE:
-						var comments []string
-						if genDecl.Doc != nil {
-							comments = CommentGroupToText(genDecl.Doc)
-						}
-						for _, spec := range genDecl.Specs {
-							if typeSpec, ok := spec.(*ast.TypeSpec); ok {
-								p.parseTypeDeclaration(typeSpec, pkg, comments)
-							}
-						}
-					case token.CONST:
-						p.parseConstDeclaration(genDecl, pkg)
-					default:
-					}
-					return true
-
-				}
-
-				return true
-			})
-		}
-		p.addTypes(pkg.Path, pkg.TypeCache)
-	}
-}
-
-func (p *Project) RelativeBindingsDir(dir *ParsedPackage, dir2 *ParsedPackage) string {
-	if dir.Dir == dir2.Dir {
+func (p *Project) RelativePackageDir(base *types.Package, target *types.Package) string {
+	if base == target {
 		return "."
 	}
 
-	// Calculate the relative path from the bindings directory of dir to that of dir2
-	var (
-		absoluteSourceDir string
-		absoluteTargetDir string
-	)
+	basePath := p.PackageDir(base)
+	targetPath := p.PackageDir(target)
 
-	if dir.Dir == p.Path {
-		absoluteSourceDir = filepath.Join(p.Path, p.outputDirectory, "main")
-	} else {
-		relativeSourceDir := strings.TrimPrefix(dir.Dir, p.Path)
-		absoluteSourceDir = filepath.Join(p.Path, p.outputDirectory, relativeSourceDir)
-	}
-
-	if dir2.Dir == p.Path {
-		absoluteTargetDir = filepath.Join(p.Path, p.outputDirectory, "main")
-	} else {
-		relativeTargetDir := strings.TrimPrefix(dir2.Dir, p.Path)
-		absoluteTargetDir = filepath.Join(p.Path, p.outputDirectory, relativeTargetDir)
-	}
-
-	relativePath, err := filepath.Rel(absoluteSourceDir, absoluteTargetDir)
+	relativePath, err := filepath.Rel(basePath, targetPath)
 	if err != nil {
 		panic(err)
 	}
@@ -1220,98 +576,81 @@ func (p *Project) RelativeBindingsDir(dir *ParsedPackage, dir2 *ParsedPackage) s
 	return filepath.ToSlash(relativePath)
 }
 
-type ImportDef struct {
-	Name        string
-	Path        string
-	VarName     string
-	PackageName string
-}
+func (p *Project) BoundMethods() []*BoundMethod {
+	methods := []*BoundMethod{}
 
-func (p *Project) calculateImports(pkg string, m map[structName]*StructDef) []*ImportDef {
-	var result []*ImportDef
-	for _, structDef := range m {
-		for _, field := range structDef.Fields {
-			if field.Type.Package != pkg {
-				// Find the relative path from the source directory to the target directory
-				fieldPkgInfo := p.packageCache[field.Type.Package]
-				relativePath := p.RelativeBindingsDir(p.packageCache[pkg], fieldPkgInfo)
-				result = append(result, &ImportDef{
-					PackageName: fieldPkgInfo.Name,
-					Name:        field.Name,
-					Path:        relativePath,
-					VarName:     fieldPkgInfo.Name + field.Name,
-				})
-			}
+	for _, pkg := range p.pkgs {
+		for _, service := range pkg.services {
+			methods = append(methods, service.Methods...)
 		}
 	}
-	return result
+	return methods
 }
 
-func getTypeString(expr ast.Expr) string {
-	switch t := expr.(type) {
-	case *ast.Ident:
-		return t.Name
-	case *ast.StarExpr:
-		return getTypeString(t.X)
-	case *ast.ArrayType:
-		return getTypeString(t.Elt)
-	case *ast.MapType:
-		return "map"
-	case *ast.SelectorExpr:
-		return getTypeString(t.Sel)
-	default:
-		return ""
-	}
-}
-
-func isStructType(expr ast.Expr) bool {
-	switch e := expr.(type) {
-	case *ast.StructType:
-		return true
-	case *ast.StarExpr:
-		return isStructType(e.X)
-	case *ast.SelectorExpr:
-		return isStructType(e.Sel)
-	case *ast.ArrayType:
-		return isStructType(e.Elt)
-	case *ast.SliceExpr:
-		return isStructType(e.X)
-	case *ast.Ident:
-		if e.Obj != nil && e.Obj.Kind == ast.Typ {
-			return isStructType(e.Obj.Decl.(*ast.TypeSpec).Type)
-		}
-		return false
-	default:
-		return false
-	}
-}
-
-func getDirectoryForPackage(pkg *ast.Package) string {
-	for filename := range pkg.Files {
-		path := filepath.Dir(filename)
-		abs, err := filepath.Abs(path)
-		if err != nil {
-			panic(err)
-		}
-		return abs
-	}
-	return ""
-}
-
-func CommentGroupToText(comments *ast.CommentGroup) []string {
-	if comments == nil {
-		return nil
-	}
-	var result []string
-	for _, comment := range comments.List {
-		result = append(result, strings.TrimSpace(comment.Text))
-	}
-	return result
-}
-
-func TrimSlice(comments []string) []string {
-	for i, comment := range comments {
-		comments[i] = strings.TrimSpace(comment)
-	}
-	return comments
+var reservedWords = []string{
+	"abstract",
+	"arguments",
+	"await",
+	"boolean",
+	"break",
+	"byte",
+	"case",
+	"catch",
+	"char",
+	"class",
+	"const",
+	"continue",
+	"debugger",
+	"default",
+	"delete",
+	"do",
+	"double",
+	"else",
+	"enum",
+	"eval",
+	"export",
+	"extends",
+	"false",
+	"final",
+	"finally",
+	"float",
+	"for",
+	"function",
+	"goto",
+	"if",
+	"implements",
+	"import",
+	"in",
+	"instanceof",
+	"int",
+	"interface",
+	"let",
+	"long",
+	"native",
+	"new",
+	"null",
+	"package",
+	"private",
+	"protected",
+	"public",
+	"return",
+	"short",
+	"static",
+	"super",
+	"switch",
+	"synchronized",
+	"this",
+	"throw",
+	"throws",
+	"transient",
+	"true",
+	"try",
+	"typeof",
+	"var",
+	"void",
+	"volatile",
+	"while",
+	"with",
+	"yield",
+	"object",
 }
