@@ -109,14 +109,14 @@ Webview Window Interface Methods
 ### Clipboard
 
 | Feature | Windows | Linux | Mac | Notes |
-|---------|---------|-------|-----|-------|
+| ------- | ------- | ----- | --- | ----- |
 | SetText | Y       | Y     | Y   |       |
 | Text    | Y       | Y     | Y   |       |
 
 ### ContextMenu
 
 | Feature          | Windows | Linux | Mac | Notes |
-|------------------|---------|-------|-----|-------|
+| ---------------- | ------- | ----- | --- | ----- |
 | OpenContextMenu  | Y       | Y     | Y   |       |
 | On By Default    |         |       |     |       |
 | Control via HTML | Y       |       |     |       |
@@ -190,7 +190,7 @@ applied when the window is created. An 'X' indicates that the option is not
 supported by the platform.
 
 | Feature                         | Windows | Linux | Mac | Notes                                      |
-|---------------------------------|---------|-------|-----|--------------------------------------------|
+| ------------------------------- | ------- | ----- | --- | ------------------------------------------ |
 | AlwaysOnTop                     | Y       | Y     |     |                                            |
 | BackgroundColour                | Y       | Y     |     |                                            |
 | BackgroundType                  |         |       |     | Acrylic seems to work but the others don't |
@@ -236,7 +236,7 @@ To log or not to log? System logger vs custom logger.
 ## Tray Menus
 
 | Feature            | Windows | Linux | Mac | Notes                                                                |
-|--------------------|---------|-------|-----|----------------------------------------------------------------------|
+| ------------------ | ------- | ----- | --- | -------------------------------------------------------------------- |
 | Icon               | Y       | Y     | Y   | Windows has default icons for light/dark mode & supports PNG or ICO. |
 | Label              | -       | Y     | Y   |                                                                      |
 | Label (ANSI Codes) | -       |       |     |                                                                      |
@@ -244,16 +244,16 @@ To log or not to log? System logger vs custom logger.
 
 ### Methods
 
-| Method                        | Windows | Linux | Mac | Notes |
-| ----------------------------- | ------- | ----- | --- | ----- |
-| setLabel(label string)        | -       | Y     | Y   |       |
-| run()                         | Y       | Y     | Y   |       |
-| setIcon(icon []byte)          | Y       | Y     | Y   |       |
-| setMenu(menu \*Menu)          | Y       | Y     | Y   |       |
-| setIconPosition(position int) | -       | Y     | Y   |       |
-| setTemplateIcon(icon []byte)  | -       | Y     | Y   |       |
-| destroy()                     | Y       | Y     | Y   |       |
-| setDarkModeIcon(icon []byte)  | Y       | Y     | Y   | Darkmode isn't handled yet (linux)      |
+| Method                        | Windows | Linux | Mac | Notes                              |
+| ----------------------------- | ------- | ----- | --- | ---------------------------------- |
+| setLabel(label string)        | -       | Y     | Y   |                                    |
+| run()                         | Y       | Y     | Y   |                                    |
+| setIcon(icon []byte)          | Y       | Y     | Y   |                                    |
+| setMenu(menu \*Menu)          | Y       | Y     | Y   |                                    |
+| setIconPosition(position int) | -       | Y     | Y   |                                    |
+| setTemplateIcon(icon []byte)  | -       | Y     | Y   |                                    |
+| destroy()                     | Y       | Y     | Y   |                                    |
+| setDarkModeIcon(icon []byte)  | Y       | Y     | Y   | Darkmode isn't handled yet (linux) |
 
 ## Cross Platform Events
 

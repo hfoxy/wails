@@ -133,14 +133,9 @@ API: `Show()`
     app.Show()
 ```
 
---8<--
-./docs/en/API/application_window.md
-./docs/en/API/application_menu.md
-./docs/en/API/application_dialogs.md
-./docs/en/API/application_events.md
-./docs/en/API/application_screens.md
---8<--
-
+--8<-- ./docs/en/API/application_window.md ./docs/en/API/application_menu.md
+./docs/en/API/application_dialogs.md ./docs/en/API/application_events.md
+./docs/en/API/application_screens.md --8<--
 
 ## Options
 

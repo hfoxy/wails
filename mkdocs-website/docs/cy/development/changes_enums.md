@@ -1,6 +1,7 @@
 #### Enawau
 
-Yng Ngo, mae enawau yn aml yn cael eu diffinio fel math a set o gysonau. Er enghraifft:
+Yng Ngo, mae enawau yn aml yn cael eu diffinio fel math a set o gysonau. Er
+enghraifft:
 
 ```go
 type MyEnum int
@@ -12,8 +13,8 @@ const (
 )
 ```
 
-Oherwydd anghydnawsedd rhwng Go a JavaScript, ni ellir defnyddio mathau custom mewn
-ffordd hon. Y strategaeth orau yw defnyddio alias math ar gyfer float64:
+Oherwydd anghydnawsedd rhwng Go a JavaScript, ni ellir defnyddio mathau custom
+mewn ffordd hon. Y strategaeth orau yw defnyddio alias math ar gyfer float64:
 
 ```go
 type MyEnum = float64
@@ -36,6 +37,6 @@ const MyEnum = {
 ```
 
 - Pam defnyddio `float64`? Oni allwn ni ddefnyddio `int`?
-    - Oherwydd nad oes gan JavaScript gysyniad o `int`. Mae popeth yn `number`, sy'n cyfieithu i `float64` yn Go. Mae hefyd cyfyngiadau
-      ar daflu mathau yn pecyn adlewyrchu Go, sy'n golygu nad yw defnyddio `int` yn
-      gweithio.
+  - Oherwydd nad oes gan JavaScript gysyniad o `int`. Mae popeth yn `number`,
+    sy'n cyfieithu i `float64` yn Go. Mae hefyd cyfyngiadau ar daflu mathau yn
+    pecyn adlewyrchu Go, sy'n golygu nad yw defnyddio `int` yn gweithio.

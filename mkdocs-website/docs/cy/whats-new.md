@@ -1,10 +1,15 @@
 # Beth sydd newydd yn Wails v3 Alpha
 
-Mae Wails v3 Alpha yn symud o'r API sengl-ffenestr, datganiadol o v2 i un proseduraidd. Mae'r API hwn cynnil yn gwneud datblygiad cod yn haws, yn gwella darllenadwyedd, ac yn datgloi apiau amlder-ffenestr cymhleth. Nid yw Wails v3 Alpha yn wella ar fersiwnau blaenorol yn unig - mae'n ailddychmygu galluoedd datblygu rhaglenni peiriannu gweledol gyda Go a thechnolegau gwe modern.
+Mae Wails v3 Alpha yn symud o'r API sengl-ffenestr, datganiadol o v2 i un
+proseduraidd. Mae'r API hwn cynnil yn gwneud datblygiad cod yn haws, yn gwella
+darllenadwyedd, ac yn datgloi apiau amlder-ffenestr cymhleth. Nid yw Wails v3
+Alpha yn wella ar fersiwnau blaenorol yn unig - mae'n ailddychmygu galluoedd
+datblygu rhaglenni peiriannu gweledol gyda Go a thechnolegau gwe modern.
 
 ## Amlder Ffenestri
 
-Mae'n awr yn bosibl creu amlder ffenestri a ffurfweddu pob un ohonynt yn annibynnol.
+Mae'n awr yn bosibl creu amlder ffenestri a ffurfweddu pob un ohonynt yn
+annibynnol.
 
 ```go
 package main
@@ -53,7 +58,8 @@ func main() {
 
 ## Systriedi
 
-Mae systriedi yn caniatáu i chi ychwanegu eicon yn ardal y system dociau eich peiriant a chael y nodweddion canlynol:
+Mae systriedi yn caniatáu i chi ychwanegu eicon yn ardal y system dociau eich
+peiriant a chael y nodweddion canlynol:
 
 - Atodwch ffenestr (bydd y ffenestr yn cael ei chanoli i'r eicon systrai)
 - Cefnogaeth lawn ar gyfer dewislen
@@ -122,21 +128,30 @@ func main() {
 
 ## Atchwanegion
 
-Mae Atchwanegion yn caniatáu i chi ehangu swyddogaeth y system Wails. Nid yn unig y gellir defnyddio dulliau atchwanegion yn Go, ond hefyd galw ohonynt o JavaScript. Atchwanegion a gynhwysir:
+Mae Atchwanegion yn caniatáu i chi ehangu swyddogaeth y system Wails. Nid yn
+unig y gellir defnyddio dulliau atchwanegion yn Go, ond hefyd galw ohonynt o
+JavaScript. Atchwanegion a gynhwysir:
 
 - kvstore - Storfa allwedd/gwerth
 - browser - agor cysylltiadau mewn porwr
 - log - logydd arferiadol
 - oauth - trafod dilysu oauth a chefnogi 60 o ddarparwyr
 - single_instance - dim ond caniatáu un copi o'ch ap i redeg
-- sqlite - ychwanegu cronfa ddata sqlite at eich ap. Yn defnyddio'r llyfrgell fullPureGo fodern
+- sqlite - ychwanegu cronfa ddata sqlite at eich ap. Yn defnyddio'r llyfrgell
+  fullPureGo fodern
 - start_at_login - Cofrestru/Dad-gofrestru eich cais i gychwyn wrth fewngofnodi
 
 ## Genedigaeth cysylltiadau gwelledig
 
-Mae v3 yn defnyddio dadansoddwr statif newydd i gynhyrchu cysylltiadau. Mae hyn yn ei gwneud yn eithriadol o gyflym ac yn cynnal sylwadau a enwau paramedrau yn eich cysylltiadau. Yn ddiofyn, cynhyrchir cysylltiadau gyda galwadau gan ddefnyddio ID yn hytrach na throednodiadau. Mae hyn yn darparu hwb perfformiad ac yn caniatáu i chi ddefnyddio offer cuddio fel [garble](https://github.com/burrowers/garble).
+Mae v3 yn defnyddio dadansoddwr statif newydd i gynhyrchu cysylltiadau. Mae hyn
+yn ei gwneud yn eithriadol o gyflym ac yn cynnal sylwadau a enwau paramedrau yn
+eich cysylltiadau. Yn ddiofyn, cynhyrchir cysylltiadau gyda galwadau gan
+ddefnyddio ID yn hytrach na throednodiadau. Mae hyn yn darparu hwb perfformiad
+ac yn caniatáu i chi ddefnyddio offer cuddio fel
+[garble](https://github.com/burrowers/garble).
 
-Cynhyrchir cysylltiadau trwy redeg `wails3 generate bindings` yn unig yn ystod cyfeiriadur y prosiect.
+Cynhyrchir cysylltiadau trwy redeg `wails3 generate bindings` yn unig yn ystod
+cyfeiriadur y prosiect.
 
 ```js
 // @ts-check
@@ -173,9 +188,15 @@ window.go.main = {
 
 ## System adeiladu gwelledig
 
-Yn v2, roedd y system adeiladu yn gwbl anhyglyw a chaled i'w addasu. Yn v3, mae'n bosibl adeiladu popeth gan ddefnyddio offer Go safonol.
+Yn v2, roedd y system adeiladu yn gwbl anhyglyw a chaled i'w addasu. Yn v3,
+mae'n bosibl adeiladu popeth gan ddefnyddio offer Go safonol.
 
-Mae'r holl waith trwm a wnaeth system adeiladu v2, fel cynhyrchu eicon, wedi'i ychwanegu fel gorchmynion offeryn yn y CLI. Rydyn ni wedi ymgorffori [Taskfile](https://taskfile.dev) yn y CLI i drefnu'r galwadau hyn i ddod â'r un profiad datblygwr â v2. Fodd bynnag, mae'r dull hwn yn dod â'r cydbwysedd perffaith o hyblygrwydd a hwylusder defnydd gan y gallwch nawr addasu'r broses adeiladu i'ch anghenion.
+Mae'r holl waith trwm a wnaeth system adeiladu v2, fel cynhyrchu eicon, wedi'i
+ychwanegu fel gorchmynion offeryn yn y CLI. Rydyn ni wedi ymgorffori
+[Taskfile](https://taskfile.dev) yn y CLI i drefnu'r galwadau hyn i ddod â'r un
+profiad datblygwr â v2. Fodd bynnag, mae'r dull hwn yn dod â'r cydbwysedd
+perffaith o hyblygrwydd a hwylusder defnydd gan y gallwch nawr addasu'r broses
+adeiladu i'ch anghenion.
 
 Gallwch hyd yn oed ddefnyddio gwneud os mai dyna eich dewis!
 
@@ -197,9 +218,15 @@ build:darwin:
 
 ## Digwyddiadau gwelledig
 
-Caiff digwyddiadau eu hamlygu nawr ar gyfer llawer o'r gweithrediadau amser gweithredu, gan eich galluogi i glymu i mewn i ddigwyddiadau cymhwysiad/system. Caiff digwyddiadau trawsblat (cyffredin) hefyd eu hamlygu lle ceir digwyddiadau platfform cyffredin, gan eich galluogi i ysgrifennu'r un dulliau trin digwyddiadau ar draws platfformau.
+Caiff digwyddiadau eu hamlygu nawr ar gyfer llawer o'r gweithrediadau amser
+gweithredu, gan eich galluogi i glymu i mewn i ddigwyddiadau cymhwysiad/system.
+Caiff digwyddiadau trawsblat (cyffredin) hefyd eu hamlygu lle ceir digwyddiadau
+platfform cyffredin, gan eich galluogi i ysgrifennu'r un dulliau trin
+digwyddiadau ar draws platfformau.
 
-Gellir hefyd gofrestru bachau digwyddiad. Mae'r rhain fel y dull `On` ond yn synchronaidd ac yn caniatáu i chi ddiddymu'r digwyddiad. Enghraifft o hyn fyddai dangos cadarnhad cyn cau ffenestr.
+Gellir hefyd gofrestru bachau digwyddiad. Mae'r rhain fel y dull `On` ond yn
+synchronaidd ac yn caniatáu i chi ddiddymu'r digwyddiad. Enghraifft o hyn fyddai
+dangos cadarnhad cyn cau ffenestr.
 
 ```go
 package main
@@ -275,8 +302,8 @@ func main() {
 
 ## Iaith Marcio Wails (wml)
 
-Nodwedd arbrofol i alw dulliau amser gweithredu gan ddefnyddio html plaen, yn debyg i
-[htmx](https://htmx.org).
+Nodwedd arbrofol i alw dulliau amser gweithredu gan ddefnyddio html plaen, yn
+debyg i [htmx](https://htmx.org).
 
 ```html
 <!doctype html>
@@ -312,6 +339,9 @@ Nodwedd arbrofol i alw dulliau amser gweithredu gan ddefnyddio html plaen, yn de
   </body>
 </html>
 ```
+
 ## Enghreifftiau
 
-Mae mwy o enghreifftiau ar gael yn y [examples](https://github.com/wailsapp/wails/tree/v3-alpha/v3/examples) cyfeiriadur. Edrychwch arnynt!
+Mae mwy o enghreifftiau ar gael yn y
+[examples](https://github.com/wailsapp/wails/tree/v3-alpha/v3/examples)
+cyfeiriadur. Edrychwch arnynt!

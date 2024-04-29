@@ -38,8 +38,8 @@ bennaf i ddangos negeseuon rhybudd i'r defnyddiwr.
 
 API: `ErrorDialog()`
 
-Mae `ErrorDialog()` yn creu ac yn dychwelyd esiampl newydd o `MessageDialog` gyda
-`ErrorDialogType`. Cynlluniwyd y deialog hon i'w defnyddio pan fydd angen
+Mae `ErrorDialog()` yn creu ac yn dychwelyd esiampl newydd o `MessageDialog`
+gyda `ErrorDialogType`. Cynlluniwyd y deialog hon i'w defnyddio pan fydd angen
 dangos neges gwall i'r defnyddiwr.
 
 ### Agor Ffeil
@@ -55,8 +55,8 @@ ragor o ffeiliau o'u system ffeiliau.
 API: `SaveFileDialog()`
 
 Mae `SaveFileDialog()` yn creu ac yn dychwelyd esiampl newydd o
-`SaveFileDialogStruct`. Mae'r deialog hon yn annog y defnyddiwr i ddewis lleoliad
-yn eu system ffeiliau lle y dylid cadw ffeil.
+`SaveFileDialogStruct`. Mae'r deialog hon yn annog y defnyddiwr i ddewis
+lleoliad yn eu system ffeiliau lle y dylid cadw ffeil.
 
 ### Agor Cyfeiriadur
 

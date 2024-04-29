@@ -31,8 +31,8 @@ Enghraifft:
 ### `data-wml-window`
 
 Gellir galw unrhyw fethododd `wails.window` drwy ychwanegu'r briodoledd
-`data-wml-window` at elfen. Dylai gwerth y briodoledd fod yn enw'r
-dull i'w alw. Dylai enw'r dull fod yn yr un acen â'r dull.
+`data-wml-window` at elfen. Dylai gwerth y briodoledd fod yn enw'r dull i'w alw.
+Dylai enw'r dull fod yn yr un acen â'r dull.
 
 ```html
 <button data-wml-window="Close">Cau'r Ffenestr</button>

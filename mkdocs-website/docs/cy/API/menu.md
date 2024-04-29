@@ -32,24 +32,24 @@ API: `YchwaneguBlwch(label string, galluogedig bool) *EitemDewislen`
 
 Mae'r dull hwn yn cymryd `label` o fath `string` a `galluogedig` o fath `bool`
 fel mewnbwn ac yn ychwanegu `EitemDewislen` blwch ticio newydd gyda'r label a'r
-cyflwr galluogedig a roddir at y ddewislen. Mae'n dychwelyd yr `EitemDewislen`
-a ychwanegwyd.
+cyflwr galluogedig a roddir at y ddewislen. Mae'n dychwelyd yr `EitemDewislen` a
+ychwanegwyd.
 
 ### YchwaneguRadio
 
 API: `YchwaneguRadio(label string, galluogedig bool) *EitemDewislen`
 
 Mae'r dull hwn yn cymryd `label` o fath `string` a `galluogedig` o fath `bool`
-fel mewnbwn ac yn ychwanegu `EitemDewislen` radio newydd gyda'r label a'r
-cyflwr galluogedig a roddir at y ddewislen. Mae'n dychwelyd yr `EitemDewislen`
-a ychwanegwyd.
+fel mewnbwn ac yn ychwanegu `EitemDewislen` radio newydd gyda'r label a'r cyflwr
+galluogedig a roddir at y ddewislen. Mae'n dychwelyd yr `EitemDewislen` a
+ychwanegwyd.
 
 ### Diweddaru
 
 API: `Diweddaru()`
 
-Mae'r dull hwn yn prosesu unrhyw grwpiau radio ac yn diweddaru'r ddewislen os
-na chaiff y rhyngwyneb dewislen ei gychwyn.
+Mae'r dull hwn yn prosesu unrhyw grwpiau radio ac yn diweddaru'r ddewislen os na
+chaiff y rhyngwyneb dewislen ei gychwyn.
 
 ### YchwaneguIsddewislen
 

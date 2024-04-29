@@ -6,11 +6,16 @@ Mae'r API cais yn cynorthwyo i greu cais gan ddefnyddio fframwaith Wails.
 
 API: `New(appOptions Options) *App`
 
-`New(appOptions Options)` yn creu cais newydd gan ddefnyddio'r opsiynau cais a ddarperir. Mae'n cymhwyso gwerthoedd rhagosodedig ar gyfer opsiynau heb eu pennu, yn eu cyfuno â'r rhai a ddarparwyd, yn eu cychwyn a'n dychwelyd enghraifft o'r cais.
+`New(appOptions Options)` yn creu cais newydd gan ddefnyddio'r opsiynau cais a
+ddarperir. Mae'n cymhwyso gwerthoedd rhagosodedig ar gyfer opsiynau heb eu
+pennu, yn eu cyfuno â'r rhai a ddarparwyd, yn eu cychwyn a'n dychwelyd
+enghraifft o'r cais.
 
-Os bydd gwall yn ystod y cychwyn, caiff y cais ei atal gyda'r neges gwall a ddarperir.
+Os bydd gwall yn ystod y cychwyn, caiff y cais ei atal gyda'r neges gwall a
+ddarperir.
 
-Dylid nodi, os oes enghraifft gyffredinol o gais yn bodoli eisoes, y bydd yr enghraifft honno'n cael ei dychwelyd yn hytrach na chreu un newydd.
+Dylid nodi, os oes enghraifft gyffredinol o gais yn bodoli eisoes, y bydd yr
+enghraifft honno'n cael ei dychwelyd yn hytrach na chreu un newydd.
 
 ```go title="main.go" hl_lines="6-9"
 package main
@@ -29,7 +34,8 @@ func main() {
 
 ### Cael
 
-`Get()` yn dychwelyd yr enghraifft gyffredinol o'r cais. Mae'n ddefnyddiol pan fydd angen mynediad i'r cais o wahanol rannau o'ch cod.
+`Get()` yn dychwelyd yr enghraifft gyffredinol o'r cais. Mae'n ddefnyddiol pan
+fydd angen mynediad i'r cais o wahanol rannau o'ch cod.
 
 ```go
     // Cael enghraifft o'r cais
@@ -40,7 +46,9 @@ func main() {
 
 API: `Capabilities() capabilities.Capabilities`
 
-`Capabilities()` yn adfer map o'r galluoedd sydd gan y cais ar hyn o bryd. Gall y galluoedd fod ynghylch y nodweddion gwahanol y system weithredu sy'n darparu, fel nodweddion gweddarlunydd.
+`Capabilities()` yn adfer map o'r galluoedd sydd gan y cais ar hyn o bryd. Gall
+y galluoedd fod ynghylch y nodweddion gwahanol y system weithredu sy'n darparu,
+fel nodweddion gweddarlunydd.
 
 ```go
     // Cael galluoedd y cais
@@ -81,7 +89,8 @@ API: `Run() error`
 
 API: `Quit()`
 
-`Quit()` yn gadael y cais trwy ddinistrio ffenestri a rhai cydrannau eraill o bosibl.
+`Quit()` yn gadael y cais trwy ddinistrio ffenestri a rhai cydrannau eraill o
+bosibl.
 
 ```go
     // Gadael y cais
@@ -92,7 +101,8 @@ API: `Quit()`
 
 API: `IsDarkMode() bool`
 
-`IsDarkMode()` yn gwirio a yw'r cais yn rhedeg mewn modd tywyll. Mae'n dychwelyd gwerth boolean yn nodi a yw'r modd tywyll wedi'i alluogi.
+`IsDarkMode()` yn gwirio a yw'r cais yn rhedeg mewn modd tywyll. Mae'n dychwelyd
+gwerth boolean yn nodi a yw'r modd tywyll wedi'i alluogi.
 
 ```go
     // Gwiriwch a yw'r modd tywyll wedi'i alluogi
@@ -123,14 +133,9 @@ API: `Show()`
     app.Show()
 ```
 
---8<--
-./docs/cy/API/application_window.md
-./docs/cy/API/application_menu.md
-./docs/cy/API/application_dialogs.md
-./docs/cy/API/application_events.md
-./docs/cy/API/application_screens.md
---8<--
-
+--8<-- ./docs/cy/API/application_window.md ./docs/cy/API/application_menu.md
+./docs/cy/API/application_dialogs.md ./docs/cy/API/application_events.md
+./docs/cy/API/application_screens.md --8<--
 
 ## Opsiynau
 

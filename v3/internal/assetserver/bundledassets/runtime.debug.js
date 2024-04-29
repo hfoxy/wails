@@ -33,7 +33,7 @@ __export(browser_exports, {
   OpenURL: () => OpenURL
 });
 
-// node_modules/nanoid/non-secure/index.js
+// desktop/@wailsio/runtime/node_modules/nanoid/non-secure/index.js
 var urlAlphabet = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
 var nanoid = (size = 21) => {
   let id = "";
@@ -859,8 +859,8 @@ var Window = class _Window {
    * @param {boolean} resizable - Whether the window should be resizable
    * @return {Promise<void>}
    */
-  SetResizable(resizable2) {
-    return this[caller](SetResizableMethod, { resizable: resizable2 });
+  SetResizable(resizable) {
+    return this[caller](SetResizableMethod, { resizable: resizable });
   }
   /**
    * Sets the size of the window.
@@ -1428,16 +1428,16 @@ function getAndDeleteResponse(id) {
 function callBinding(type, options = {}) {
   const id = generateID2();
   const doCancel = () => {
-    cancelCall(type, { "call-id": id });
+    return cancelCall(type, { "call-id": id });
   };
-  var queuedCancel = false, callRunning = false;
-  var p = new Promise((resolve, reject) => {
+  let queuedCancel = false, callRunning = false;
+  let p = new Promise((resolve, reject) => {
     options["call-id"] = id;
     callResponses.set(id, { resolve, reject });
     call7(type, options).then((_) => {
       callRunning = true;
       if (queuedCancel) {
-        doCancel();
+        return doCancel();
       }
     }).catch((error) => {
       reject(error);
@@ -1446,7 +1446,7 @@ function callBinding(type, options = {}) {
   });
   p.cancel = () => {
     if (callRunning) {
-      doCancel();
+      return doCancel();
     } else {
       queuedCancel = true;
     }

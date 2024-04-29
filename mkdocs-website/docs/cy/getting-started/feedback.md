@@ -1,12 +1,12 @@
 # Adborth
 
-Croeso (ac anogaeth) i'ch adborth! Chwiliwch am docynnau neu
-bostiau presennol cyn creu rhai newydd. Dyma'r ffyrdd gwahanol i ddarparu adborth:
+Croeso (ac anogaeth) i'ch adborth! Chwiliwch am docynnau neu bostiau presennol
+cyn creu rhai newydd. Dyma'r ffyrdd gwahanol i ddarparu adborth:
 
 === "Difrod"
 
     Os ydych yn canfod nam, rhowch wybod i ni drwy bostio yn y [v3 Alpha Feedback](https://discord.gg/3mgVyGua) sianel ar Discord.
-    
+
     - Dylai'r post nodi'n glir beth yw'r nam a chael enghraifft syml y gellir ei ailadrodd. Os yw'r dogfennaeth yn aneglur beth sy'n *digwydd* i ddigwydd, nodwch hynny yn y post.
     - Dylid rhoi'r tag `Bug` i'r post.
     - Dylech gynnwys allbwn `wails doctor` yn eich post.
@@ -17,7 +17,6 @@ bostiau presennol cyn creu rhai newydd. Dyma'r ffyrdd gwahanol i ddarparu adbort
 
     !!! warning
         *Cofiwch*, nid yw ymddygiad annisgwyl o reidrwydd yn nam - efallai nad yw'n gwneud yr hyn yr ydych yn disgwyl iddo ei wneud. Defnyddiwch [Awgrymiadau](#awgrymiadau) ar gyfer hyn.
-
 
 === "Cywiriadau"
 

@@ -1,7 +1,7 @@
 # Next Steps
 
-Now that you have created your first application, you can start exploring the other features that v3 alpha provides.
-
+Now that you have created your first application, you can start exploring the
+other features that v3 alpha provides.
 
 ## Examples
 
@@ -16,5 +16,4 @@ go run .
 
 in the example directory.
 
-!!! note
-    Some examples may not work during alpha development.
+!!! note Some examples may not work during alpha development.

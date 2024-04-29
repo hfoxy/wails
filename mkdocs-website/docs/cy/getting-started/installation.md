@@ -1,7 +1,7 @@
 # Gosod
 
-I osod yr Wails CLI, sicrhewch eich bod wedi gosod [Go 1.21+](https://go.dev/dl/)
-a rhedwch:
+I osod yr Wails CLI, sicrhewch eich bod wedi gosod
+[Go 1.21+](https://go.dev/dl/) a rhedwch:
 
 ```shell
 git clone https://github.com/wailsapp/wails.git
@@ -66,9 +66,8 @@ Bydd angen i chi hefyd osod dibyniaeth penodol i'r platfform:
 
 ## Gwirio'r System
 
-Bydd rhedeg `wails3 doctor` yn gwirio a oes gennych y dibyniaeth cywir
-wedi'i gosod. Os nad oes, bydd yn rhoi cyngor ar yr hyn sydd ar goll a sut i
-unioni
+Bydd rhedeg `wails3 doctor` yn gwirio a oes gennych y dibyniaeth cywir wedi'i
+gosod. Os nad oes, bydd yn rhoi cyngor ar yr hyn sydd ar goll a sut i unioni
 unrhyw broblemau.
 
 ## Mae'r gorchymyn `wails3` yn ymddangos fel ei fod ar goll?

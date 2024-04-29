@@ -36,7 +36,7 @@ const MyEnum = {
 ```
 
 - Why use `float64`? Can't we use `int`?
-    - Because JavaScript doesn't have a concept of `int`. Everything is a
-      `number`, which translates to `float64` in Go. There are also restrictions
-      on casting types in Go's reflection package, which means using `int` doesn't
-      work.
+  - Because JavaScript doesn't have a concept of `int`. Everything is a
+    `number`, which translates to `float64` in Go. There are also restrictions
+    on casting types in Go's reflection package, which means using `int` doesn't
+    work.

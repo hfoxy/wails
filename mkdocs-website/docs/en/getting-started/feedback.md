@@ -5,8 +5,8 @@ posts before creating new ones. Here are the different ways to provide feedback:
 
 === "Bugs"
 
-    If you find a bug, please let us know by posting into the [v3 Alpha Feedback](https://discord.gg/Vgff2p8gsy) channel on Discord. 
-    
+    If you find a bug, please let us know by posting into the [v3 Alpha Feedback](https://discord.gg/Vgff2p8gsy) channel on Discord.
+
     - The post should clearly state what the bug is and have a simple reproducible example. If the docs are unclear what *should* happen, please include that in the post.
     - The post should be given the `Bug` tag.
     - Please include the output of `wails doctor` in your post.
@@ -17,7 +17,6 @@ posts before creating new ones. Here are the different ways to provide feedback:
 
     !!! warning
         *Remember*, unexpected behaviour isn't necessarily a bug - it might just not do what you expect it to do. Use [Suggestions](#suggestions) for this.
-
 
 === "Fixes"
 
