@@ -13,6 +13,12 @@ func newApplication(options Options) *App {
 
 func (a *App) logStartup() {}
 
-func (a *App) preRun() error { return nil }
+func (a *App) preRun() error {
+	if a.options.SingleInstance.UniqueId != "" {
+		a.setupSingleInstance(a.options.SingleInstance.UniqueId)
+	}
+
+	return nil
+}
 
 func (a *App) postQuit() error { return nil }

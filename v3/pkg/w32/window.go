@@ -251,3 +251,11 @@ func EnumChildWindows(hwnd HWND, callback func(hwnd HWND, lparam LPARAM) LRESULT
 	r, _, _ := procEnumChildWindows.Call(hwnd, syscall.NewCallback(callback), 0)
 	return r
 }
+
+func FindWindowW(className, windowName *uint16) HWND {
+	ret, _, _ := procFindWindowW.Call(
+		uintptr(unsafe.Pointer(className)),
+		uintptr(unsafe.Pointer(windowName)))
+
+	return HWND(ret)
+}

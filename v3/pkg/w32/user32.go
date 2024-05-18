@@ -27,6 +27,7 @@ var (
 	procShowWindowAsync               = moduser32.NewProc("ShowWindowAsync")
 	procUpdateWindow                  = moduser32.NewProc("UpdateWindow")
 	procCreateWindowEx                = moduser32.NewProc("CreateWindowExW")
+	procFindWindowW                   = moduser32.NewProc("FindWindowW")
 	procAdjustWindowRect              = moduser32.NewProc("AdjustWindowRect")
 	procAdjustWindowRectEx            = moduser32.NewProc("AdjustWindowRectEx")
 	procDestroyWindow                 = moduser32.NewProc("DestroyWindow")

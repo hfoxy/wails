@@ -11,6 +11,10 @@ import (
 var devMode = false
 
 func (a *App) preRun() error {
+	if a.options.SingleInstance.UniqueId != "" {
+		a.setupSingleInstance(a.options.SingleInstance.UniqueId)
+	}
+
 	// Check for frontend server url
 	frontendURL := assetserver.GetDevServerURL()
 	if frontendURL != "" {

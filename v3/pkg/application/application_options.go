@@ -28,6 +28,9 @@ type Options struct {
 	// Linux is the Linux specific configuration for Linux builds
 	Linux LinuxOptions
 
+	// SingleInstance is the configuration for single instance applications
+	SingleInstance SingleInstanceOptions
+
 	// Bind allows you to bind Go methods to the frontend.
 	Bind []any
 
@@ -92,6 +95,17 @@ type AssetOptions struct {
 
 	// DisableLogging disables logging of the AssetServer. By default, the AssetServer logs every request.
 	DisableLogging bool
+}
+
+type SingleInstanceOptions struct {
+	// uniqueId that will be used for setting up messaging between instances
+	UniqueId string
+	// TODO: OnSecondInstanceLaunch func(secondInstanceData SecondInstanceData)
+}
+
+type SecondInstanceData struct {
+	Args             []string
+	WorkingDirectory string
 }
 
 // Middleware defines HTTP middleware that can be applied to the AssetServer.
